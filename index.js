@@ -9,6 +9,11 @@ const app = express();
 app.use(express.json());
 app.use(express.static('public'));
 
+// Добавь этот маршрут в index.js после app.use()
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'fragment.html'));
+});
+
 // Web App страница
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'fragment.html'));
@@ -85,3 +90,4 @@ bot.on('callback_query', (query) => {
 });
 
 console.log('Бот запущен. Домен:', process.env.RAILWAY_STATIC_URL);
+
