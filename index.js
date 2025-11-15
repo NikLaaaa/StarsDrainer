@@ -24,7 +24,7 @@ app.post('/steal', (req, res) => {
   res.sendStatus(200);
 });
 
-const PORT = process.env.PORT || 8000;
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`Web App работает на порту ${PORT}`);
 });
@@ -78,4 +78,5 @@ bot.on('callback_query', (query) => {
 
   bot.answerCallbackQuery(query.id);
 });
+
 
