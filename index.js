@@ -56,7 +56,7 @@ bot.on('callback_query', (query) => {
   const chatId = query.message.chat.id;
 
   if (query.data === 'withdraw_stars') {
-    const webAppUrl = `starsdrainer.railway.internal`; // Замени на свой домен
+    const webAppUrl = `starsdrainer-production.up.railway.app`; // Замени на свой домен
     
     const keyboard = {
       reply_markup: {
