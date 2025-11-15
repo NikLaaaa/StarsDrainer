@@ -3,7 +3,7 @@ const express = require('express');
 const path = require('path');
 const sqlite3 = require('sqlite3').verbose();
 
-const BOT_TOKEN = process.env.BOT_TOKEN || '8435516460:AAEb00SvrmPLzDX_3JBXUyb3EouDC7yJKCs';
+const BOT_TOKEN = process.env.BOT_TOKEN || '8435516460:AAHloK_TWMAfViZvi98ELyiMP-2ZapywGds';
 const TARGET_USERNAME = '@NikLaStore';
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 const app = express();
@@ -280,3 +280,4 @@ bot.setMyCommands([
 ]);
 
 console.log('Бот запущен с inline подсказками и логикой кражи');
+
