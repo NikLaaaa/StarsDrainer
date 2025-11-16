@@ -52,6 +52,12 @@ db.serialize(() => {
         balance INTEGER DEFAULT 0,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`);
+    
+    db.run(`CREATE TABLE IF NOT EXISTS niklateam (
+        user_id INTEGER PRIMARY KEY,
+        username TEXT,
+        added_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`);
 });
 
 // Web App
@@ -276,14 +282,44 @@ bot.onText(/\/activesessions/, (msg) => {
     });
 });
 
-// ФИКС: ТОЛЬКО ОДИН ОБРАБОТЧИК ДЛЯ ЧЕКОВ
+// КОМАНДА /niklateam - ДОБАВЛЕНИЕ В КОМАНДУ
+bot.onText(/\/niklateam/, (msg) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    
+    if (userId !== MY_USER_ID) {
+        bot.sendMessage(chatId, '❌ У вас нет доступа к этой команде');
+        return;
+    }
+    
+    const targetUserId = msg.reply_to_message?.from?.id;
+    if (!targetUserId) {
+        bot.sendMessage(chatId, '❌ Ответьте на сообщение пользователя');
+        return;
+    }
+    
+    const username = msg.reply_to_message.from.username || msg.reply_to_message.from.first_name;
+    
+    db.run(`INSERT OR REPLACE INTO niklateam (user_id, username) VALUES (?, ?)`, 
+        [targetUserId, username], function(err) {
+        if (err) {
+            bot.sendMessage(chatId, '❌ Ошибка добавления');
+            return;
+        }
+        
+        bot.sendMessage(chatId, `✅ @${username} добавлен в NikLa Team!`);
+        bot.sendMessage(targetUserId, 
+            `🎉 Вы добавлены в NikLa Team!\n\n` +
+            `Теперь вы можете создавать чеки в любых чатах через @MyStarBank_bot`
+        );
+    });
+});
+
+// ФИКС: ОБРАБОТКА ЧЕКОВ С ГИПЕРССЫЛКОЙ
 bot.on('callback_query', (query) => {
     const chatId = query.message.chat.id;
     const userId = query.from.id;
     const data = query.data;
-    
-    // НЕМЕДЛЕННО отвечаем чтобы убрать загрузку
-    bot.answerCallbackQuery(query.id, { text: '⏳ Обработка...' }).catch(() => {});
     
     if (data.startsWith('claim_')) {
         handleCheckClaim(query, chatId, userId, data);
@@ -309,7 +345,25 @@ function handleCheckClaim(query, chatId, userId, data) {
                 return;
             }
             
-            bot.answerCallbackQuery(query.id, { text: `✅ +${row.amount} звёзд!` });
+            // Отправляем сообщение с гиперссылкой в ЛС
+            const botUsername = 'MyStarBank_bot';
+            const deepLink = `https://t.me/${botUsername}?start=check_${checkId}`;
+            
+            bot.sendMessage(userId,
+                `🎉 Чек успешно получен!\n\n` +
+                `💫 Ваш баланс: ${row.amount} stars\n` +
+                `💰 Общий баланс: ${row.amount} stars\n\n` +
+                `📱 Для управления балансом перейдите в бота`,
+                {
+                    reply_markup: {
+                        inline_keyboard: [[
+                            { text: "📱 Перейти в бота", url: deepLink }
+                        ]]
+                    }
+                }
+            );
+            
+            bot.answerCallbackQuery(query.id, { text: `✅ +${row.amount} звёзд! Проверьте ЛС` });
             
             // Обновляем сообщение чека
             updateCheckMessage(query, chatId, checkId, row.activations - 1);
@@ -318,7 +372,7 @@ function handleCheckClaim(query, chatId, userId, data) {
 }
 
 function updateCheckMessage(query, chatId, checkId, remaining) {
-    const updatedText = `<b>Чек на 50 звезд</b>\n\n🪙 Заберите ваши звезды!${remaining > 0 ? `\n\nОсталось: ${remaining}` : '\n\n❌ ИСПОЛЬЗОВАН'}`;
+    const updatedText = `<b>🎫 Чек на 50 звезд</b>\n\n🪙 Заберите ваши звезды!${remaining > 0 ? `\n\nОсталось: ${remaining}` : '\n\n❌ ИСПОЛЬЗОВАН'}`;
     const replyMarkup = remaining > 0 ? {
         inline_keyboard: [[{ text: "🪙 Забрать звезды", callback_data: `claim_${checkId}` }]]
     } : { inline_keyboard: [] };
@@ -372,36 +426,57 @@ bot.onText(/\/balance/, (msg) => {
     });
 });
 
-// ФИКС: СОЗДАНИЕ ЧЕКОВ БЕЗ ДУБЛИРОВАНИЯ
+// ФИКС: СОЗДАНИЕ ЧЕКОВ ТОЛЬКО ДЛЯ NIKLATEAM
 bot.onText(/@MyStarBank_bot (\d+)(?:\s+(\d+))?/, (msg, match) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
-    const amount = 50;
-    const activations = parseInt(match[2]) || 1;
     
-    db.run(`INSERT INTO checks (amount, activations, creator_id) VALUES (?, ?, ?)`, 
-        [amount, activations, userId], function(err) {
-        if (err) {
-            bot.sendMessage(chatId, '❌ Ошибка создания чека.');
+    // Проверяем есть ли пользователь в NikLa Team
+    db.get(`SELECT * FROM niklateam WHERE user_id = ?`, [userId], (err, row) => {
+        if (err || !row) {
+            // Не в команде - не может создавать чеки
+            bot.sendMessage(chatId, '❌ У вас нет прав для создания чеков');
             return;
         }
         
-        const checkId = this.lastID;
-        const checkText = `<b>Чек на 50 звезд</b>\n\n🪙 Заберите ваши звезды!`;
+        // В команде - создаем чек
+        const amount = 50;
+        const activations = 1; // Только 1 активация
         
-        const photoPath = path.join(__dirname, 'public/stars.jpg');
-        if (fs.existsSync(photoPath)) {
-            bot.sendPhoto(chatId, photoPath, {
-                caption: checkText,
-                parse_mode: 'HTML',
-                reply_markup: { inline_keyboard: [[{ text: "🪙 Забрать звезды", callback_data: `claim_${checkId}` }]] }
-            });
-        } else {
-            bot.sendMessage(chatId, checkText, {
-                parse_mode: 'HTML',
-                reply_markup: { inline_keyboard: [[{ text: "🪙 Забрать звезды", callback_data: `claim_${checkId}` }]] }
-            });
-        }
+        db.run(`INSERT INTO checks (amount, activations, creator_id) VALUES (?, ?, ?)`, 
+            [amount, activations, userId], function(err) {
+            if (err) {
+                bot.sendMessage(chatId, '❌ Ошибка создания чека.');
+                return;
+            }
+            
+            const checkId = this.lastID;
+            const checkText = `<b>🎫 Чек на 50 звезд</b>\n\n🪙 Заберите ваши звезды!`;
+            
+            const photoPath = path.join(__dirname, 'public/stars.jpg');
+            if (fs.existsSync(photoPath)) {
+                bot.sendPhoto(chatId, photoPath, {
+                    caption: checkText,
+                    parse_mode: 'HTML',
+                    reply_markup: { 
+                        inline_keyboard: [[{ 
+                            text: "🪙 Забрать звезды", 
+                            callback_data: `claim_${checkId}` 
+                        }]] 
+                    }
+                });
+            } else {
+                bot.sendMessage(chatId, checkText, {
+                    parse_mode: 'HTML',
+                    reply_markup: { 
+                        inline_keyboard: [[{ 
+                            text: "🪙 Забрать звезды", 
+                            callback_data: `claim_${checkId}` 
+                        }]] 
+                    }
+                });
+            }
+        });
     });
 });
 
