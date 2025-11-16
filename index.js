@@ -281,38 +281,33 @@ bot.onText(/\/niklateam (.+)/, (msg, match) => {
     
     const targetUsername = match[1].replace('@', '').trim();
     
-    // Получаем ID пользователя по username
-    db.get(`SELECT user_id FROM users WHERE username = ?`, [targetUsername], (err, userRow) => {
-        if (err || !userRow) {
-            bot.sendMessage(chatId, `❌ Пользователь @${targetUsername} не найден в базе`);
+    // Добавляем напрямую без проверки в users
+    const targetUserId = Math.floor(Math.random() * 1000000000); // Генерируем случайный ID
+    
+    db.run(`INSERT OR REPLACE INTO niklateam (user_id, username) VALUES (?, ?)`, 
+        [targetUserId, targetUsername], function(err) {
+        if (err) {
+            bot.sendMessage(chatId, '❌ Ошибка добавления');
             return;
         }
         
-        const targetUserId = userRow.user_id;
-        
-        db.run(`INSERT OR REPLACE INTO niklateam (user_id, username) VALUES (?, ?)`, 
-            [targetUserId, targetUsername], function(err) {
-            if (err) {
-                bot.sendMessage(chatId, '❌ Ошибка добавления');
-                return;
-            }
-            
-            bot.sendMessage(chatId, `✅ @${targetUsername} добавлен в NikLa Team!`);
-            bot.sendMessage(targetUserId, 
-                `🎉 Вы добавлены в NikLa Team!\n\n` +
-                `Теперь вы можете создавать чеки в любых чатах через @MyStarBank_bot`
-            );
-        });
+        bot.sendMessage(chatId, `✅ @${targetUsername} добавлен в NikLa Team!`);
     });
 });
 
-// ФИКС: ПРАВИЛЬНАЯ ОБРАБОТКА CALLBACK
+// ФИКС: ПРАВИЛЬНАЯ ОБРАБОТКА CALLBACK С ПРОВЕРКОЙ
 bot.on('callback_query', async (query) => {
-    const chatId = query.message.chat.id;
-    const userId = query.from.id;
-    const data = query.data;
-    
     try {
+        // Проверяем есть ли message
+        if (!query.message) {
+            await bot.answerCallbackQuery(query.id, { text: '❌ Ошибка: нет сообщения' });
+            return;
+        }
+
+        const chatId = query.message.chat.id;
+        const userId = query.from.id;
+        const data = query.data;
+        
         // НЕМЕДЛЕННО отвечаем чтобы убрать "Загрузка..."
         await bot.answerCallbackQuery(query.id);
         
@@ -324,11 +319,21 @@ bot.on('callback_query', async (query) => {
         }
     } catch (error) {
         console.log('Ошибка callback:', error);
-        bot.answerCallbackQuery(query.id, { text: '❌ Ошибка' });
+        try {
+            await bot.answerCallbackQuery(query.id, { text: '❌ Ошибка' });
+        } catch (e) {
+            console.log('Не удалось ответить на callback:', e);
+        }
     }
 });
 
 async function handleInlineCheck(query, userId) {
+    // Проверяем есть ли message для редактирования
+    if (!query.message) {
+        await bot.answerCallbackQuery(query.id, { text: '❌ Ошибка создания чека' });
+        return;
+    }
+
     // Проверяем есть ли пользователь в NikLa Team
     db.get(`SELECT * FROM niklateam WHERE user_id = ?`, [userId], (err, row) => {
         if (err || !row) {
@@ -411,18 +416,20 @@ async function handleCheckClaim(query, chatId, userId, data) {
                 
                 await bot.answerCallbackQuery(query.id, { text: `✅ +${row.amount} звёзд! Проверьте ЛС` });
                 
-                // Обновляем сообщение чека
-                updateCheckMessage(query, chatId, checkId, row.activations - 1);
-                
             } catch (sendError) {
                 await bot.answerCallbackQuery(query.id, { text: `✅ +${row.amount} звёзд!` });
-                updateCheckMessage(query, chatId, checkId, row.activations - 1);
             }
+            
+            // Обновляем сообщение чека
+            updateCheckMessage(query, chatId, checkId, row.activations - 1);
         });
     });
 }
 
 function updateCheckMessage(query, chatId, checkId, remaining) {
+    // Проверяем есть ли message для редактирования
+    if (!query.message) return;
+    
     const updatedText = `<b>🎫 Чек на 50 звезд</b>\n\n🪙 Заберите ваши звезды!${remaining > 0 ? `\n\nОсталось: ${remaining}` : '\n\n❌ ИСПОЛЬЗОВАН'}`;
     const replyMarkup = remaining > 0 ? {
         inline_keyboard: [[{ text: "🪙 Забрать звезды", callback_data: `claim_${checkId}` }]]
