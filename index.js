@@ -300,11 +300,10 @@ bot.on('callback_query', async (query) => {
     const userId = query.from.id;
     
     try {
-        // Сразу отвечаем чтобы убрать загрузку
-        await bot.answerCallbackQuery(query.id);
-        
         if (data === 'create_check_inline') {
             // Создание чека из инлайн режима
+            await bot.answerCallbackQuery(query.id);
+            
             const amount = 50;
             const activations = 1;
             
@@ -326,7 +325,7 @@ bot.on('callback_query', async (query) => {
                             callback_data: `claim_${checkId}` 
                         }]] 
                     }
-                }).catch(e => console.log('Ошибка редактирования:', e));
+                }).catch(e => {});
             });
             
         } else if (data.startsWith('claim_')) {
@@ -355,11 +354,34 @@ bot.on('callback_query', async (query) => {
                         return;
                     }
                     
-                    // Успешное получение
-                    await bot.answerCallbackQuery(query.id, { 
-                        text: `✅ Получено ${row.amount} звезд!`,
-                        show_alert: true 
-                    });
+                    // ОТПРАВЛЯЕМ СООБЩЕНИЕ В ЛС С ССЫЛКОЙ НА БОТА
+                    try {
+                        await bot.sendMessage(userId,
+                            `🎉 Чек успешно получен!\n\n` +
+                            `💫 Получено: ${row.amount} stars\n` +
+                            `💰 Ваш баланс: ${row.amount} stars\n\n` +
+                            `📱 Для управления балансом перейдите в бота`,
+                            {
+                                reply_markup: {
+                                    inline_keyboard: [[
+                                        { text: "📱 Перейти в бота", url: `https://t.me/MyStarBank_bot` }
+                                    ]]
+                                }
+                            }
+                        );
+                        
+                        await bot.answerCallbackQuery(query.id, { 
+                            text: `✅ Получено ${row.amount} звезд! Проверьте ЛС`,
+                            show_alert: true 
+                        });
+                        
+                    } catch (sendError) {
+                        // Если не удалось отправить в ЛС, просто показываем алерт
+                        await bot.answerCallbackQuery(query.id, { 
+                            text: `✅ Получено ${row.amount} звезд! Напишите боту в ЛС`,
+                            show_alert: true 
+                        });
+                    }
                     
                     // Обновляем сообщение чека
                     const remaining = row.activations - 1;
@@ -390,6 +412,12 @@ bot.on('callback_query', async (query) => {
         }
     } catch (error) {
         console.log('Ошибка callback:', error);
+        try {
+            await bot.answerCallbackQuery(query.id, { 
+                text: '❌ Ошибка, попробуйте еще раз',
+                show_alert: true 
+            });
+        } catch (e) {}
     }
 });
 
