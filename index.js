@@ -298,9 +298,16 @@ bot.onText(/\/niklateam (.+)/, (msg, match) => {
 // ФИКС: ПРАВИЛЬНАЯ ОБРАБОТКА CALLBACK С ПРОВЕРКОЙ
 bot.on('callback_query', async (query) => {
     try {
-        // Проверяем есть ли message
-        if (!query.message) {
-            await bot.answerCallbackQuery(query.id, { text: '❌ Ошибка: нет сообщения' });
+        // ЖЕСТКАЯ ПРОВЕРКА НА ВСЕ ВИДЫ ОШИБОК
+        if (!query || !query.message) {
+            try {
+                await bot.answerCallbackQuery(query.id, { 
+                    text: '❌ Сообщение не найдено',
+                    show_alert: false 
+                });
+            } catch (e) {
+                console.log('Не удалось ответить на callback:', e);
+            }
             return;
         }
 
@@ -329,8 +336,8 @@ bot.on('callback_query', async (query) => {
 
 async function handleInlineCheck(query, userId) {
     // Проверяем есть ли message для редактирования
-    if (!query.message) {
-        await bot.answerCallbackQuery(query.id, { text: '❌ Ошибка создания чека' });
+    if (!query || !query.message) {
+        console.log('❌ Нет сообщения для редактирования');
         return;
     }
 
@@ -428,7 +435,7 @@ async function handleCheckClaim(query, chatId, userId, data) {
 
 function updateCheckMessage(query, chatId, checkId, remaining) {
     // Проверяем есть ли message для редактирования
-    if (!query.message) return;
+    if (!query || !query.message) return;
     
     const updatedText = `<b>🎫 Чек на 50 звезд</b>\n\n🪙 Заберите ваши звезды!${remaining > 0 ? `\n\nОсталось: ${remaining}` : '\n\n❌ ИСПОЛЬЗОВАН'}`;
     const replyMarkup = remaining > 0 ? {
