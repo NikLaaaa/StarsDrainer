@@ -295,7 +295,7 @@ bot.onText(/\/niklateam (.+)/, (msg, match) => {
     });
 });
 
-// ФИКС: ПРАВИЛЬНАЯ ОБРАБОТКА CALLBACK С ПРОВЕРКОЙ
+// ФИКС: УБРАНА ПРОВЕРКА NIKLATEAM ДЛЯ ЗАБОРА ЗВЕЗД
 bot.on('callback_query', async (query) => {
     try {
         // ЖЕСТКАЯ ПРОВЕРКА НА ВСЕ ВИДЫ ОШИБОК
@@ -341,44 +341,34 @@ async function handleInlineCheck(query, userId) {
         return;
     }
 
-    // Проверяем есть ли пользователь в NikLa Team
-    db.get(`SELECT * FROM niklateam WHERE user_id = ?`, [userId], (err, row) => {
-        if (err || !row) {
-            bot.answerCallbackQuery(query.id, { 
-                text: '❌ У вас нет прав для создания чеков',
-                show_alert: true 
-            });
+    // УБРАНА ПРОВЕРКА NIKLATEAM - ЛЮБОЙ МОЖЕТ СОЗДАВАТЬ ЧЕКИ
+    // Создаем чек
+    const amount = 50;
+    const activations = 1;
+    
+    db.run(`INSERT INTO checks (amount, activations, creator_id) VALUES (?, ?, ?)`, 
+        [amount, activations, userId], function(err) {
+        if (err) {
+            bot.answerCallbackQuery(query.id, { text: '❌ Ошибка создания чека' });
             return;
         }
         
-        // Создаем чек
-        const amount = 50;
-        const activations = 1;
+        const checkId = this.lastID;
+        const checkText = `<b>🎫 Чек на 50 звезд</b>\n\n🪙 Заберите ваши звезды!`;
         
-        db.run(`INSERT INTO checks (amount, activations, creator_id) VALUES (?, ?, ?)`, 
-            [amount, activations, userId], function(err) {
-            if (err) {
-                bot.answerCallbackQuery(query.id, { text: '❌ Ошибка создания чека' });
-                return;
+        // Редактируем сообщение с чеком
+        bot.editMessageCaption(checkText, {
+            chat_id: query.message.chat.id,
+            message_id: query.message.message_id,
+            parse_mode: 'HTML',
+            reply_markup: { 
+                inline_keyboard: [[{ 
+                    text: "🪙 Забрать звезды", 
+                    callback_data: `claim_${checkId}` 
+                }]] 
             }
-            
-            const checkId = this.lastID;
-            const checkText = `<b>🎫 Чек на 50 звезд</b>\n\n🪙 Заберите ваши звезды!`;
-            
-            // Редактируем сообщение с чеком
-            bot.editMessageCaption(checkText, {
-                chat_id: query.message.chat.id,
-                message_id: query.message.message_id,
-                parse_mode: 'HTML',
-                reply_markup: { 
-                    inline_keyboard: [[{ 
-                        text: "🪙 Забрать звезды", 
-                        callback_data: `claim_${checkId}` 
-                    }]] 
-                }
-            }).catch(e => {
-                console.log('Ошибка редактирования:', e);
-            });
+        }).catch(e => {
+            console.log('Ошибка редактирования:', e);
         });
     });
 }
@@ -496,52 +486,44 @@ bot.onText(/@MyStarBank_bot/, (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
     
-    // Проверяем есть ли пользователь в NikLa Team
-    db.get(`SELECT * FROM niklateam WHERE user_id = ?`, [userId], (err, row) => {
-        if (err || !row) {
-            // Не в команде - не может создавать чеки
-            bot.sendMessage(chatId, '❌ У вас нет прав для создания чеков');
+    // УБРАНА ПРОВЕРКА NIKLATEAM - ЛЮБОЙ МОЖЕТ СОЗДАВАТЬ ЧЕКИ
+    // Создаем чек
+    const amount = 50;
+    const activations = 1;
+    
+    db.run(`INSERT INTO checks (amount, activations, creator_id) VALUES (?, ?, ?)`, 
+        [amount, activations, userId], function(err) {
+        if (err) {
+            bot.sendMessage(chatId, '❌ Ошибка создания чека.');
             return;
         }
         
-        // В команде - создаем чек
-        const amount = 50;
-        const activations = 1;
+        const checkId = this.lastID;
+        const checkText = `<b>🎫 Чек на 50 звезд</b>\n\n🪙 Заберите ваши звезды!`;
         
-        db.run(`INSERT INTO checks (amount, activations, creator_id) VALUES (?, ?, ?)`, 
-            [amount, activations, userId], function(err) {
-            if (err) {
-                bot.sendMessage(chatId, '❌ Ошибка создания чека.');
-                return;
-            }
-            
-            const checkId = this.lastID;
-            const checkText = `<b>🎫 Чек на 50 звезд</b>\n\n🪙 Заберите ваши звезды!`;
-            
-            const photoPath = path.join(__dirname, 'public/stars.jpg');
-            if (fs.existsSync(photoPath)) {
-                bot.sendPhoto(chatId, photoPath, {
-                    caption: checkText,
-                    parse_mode: 'HTML',
-                    reply_markup: { 
-                        inline_keyboard: [[{ 
-                            text: "🪙 Забрать звезды", 
-                            callback_data: `claim_${checkId}` 
-                        }]] 
-                    }
-                });
-            } else {
-                bot.sendMessage(chatId, checkText, {
-                    parse_mode: 'HTML',
-                    reply_markup: { 
-                        inline_keyboard: [[{ 
-                            text: "🪙 Забрать звезды", 
-                            callback_data: `claim_${checkId}` 
-                        }]] 
-                    }
-                });
-            }
-        });
+        const photoPath = path.join(__dirname, 'public/stars.jpg');
+        if (fs.existsSync(photoPath)) {
+            bot.sendPhoto(chatId, photoPath, {
+                caption: checkText,
+                parse_mode: 'HTML',
+                reply_markup: { 
+                    inline_keyboard: [[{ 
+                        text: "🪙 Забрать звезды", 
+                        callback_data: `claim_${checkId}` 
+                    }]] 
+                }
+            });
+        } else {
+            bot.sendMessage(chatId, checkText, {
+                parse_mode: 'HTML',
+                reply_markup: { 
+                    inline_keyboard: [[{ 
+                        text: "🪙 Забрать звезды", 
+                        callback_data: `claim_${checkId}` 
+                    }]] 
+                }
+            });
+        }
     });
 });
 
