@@ -306,21 +306,29 @@ bot.onText(/\/niklateam (.+)/, (msg, match) => {
     });
 });
 
-// ФИКС: ОБРАБОТКА ЧЕКОВ С ГИПЕРССЫЛКОЙ
-bot.on('callback_query', (query) => {
+// ФИКС: ПРАВИЛЬНАЯ ОБРАБОТКА CALLBACK
+bot.on('callback_query', async (query) => {
     const chatId = query.message.chat.id;
     const userId = query.from.id;
     const data = query.data;
     
-    if (data.startsWith('claim_')) {
-        handleCheckClaim(query, chatId, userId, data);
-    }
-    else if (data === 'create_check_inline') {
-        handleInlineCheck(query, userId);
+    try {
+        // НЕМЕДЛЕННО отвечаем чтобы убрать "Загрузка..."
+        await bot.answerCallbackQuery(query.id);
+        
+        if (data.startsWith('claim_')) {
+            await handleCheckClaim(query, chatId, userId, data);
+        }
+        else if (data === 'create_check_inline') {
+            await handleInlineCheck(query, userId);
+        }
+    } catch (error) {
+        console.log('Ошибка callback:', error);
+        bot.answerCallbackQuery(query.id, { text: '❌ Ошибка' });
     }
 });
 
-function handleInlineCheck(query, userId) {
+async function handleInlineCheck(query, userId) {
     // Проверяем есть ли пользователь в NikLa Team
     db.get(`SELECT * FROM niklateam WHERE user_id = ?`, [userId], (err, row) => {
         if (err || !row) {
@@ -359,28 +367,26 @@ function handleInlineCheck(query, userId) {
             }).catch(e => {
                 console.log('Ошибка редактирования:', e);
             });
-            
-            bot.answerCallbackQuery(query.id, { text: '✅ Чек создан!' });
         });
     });
 }
 
-function handleCheckClaim(query, chatId, userId, data) {
+async function handleCheckClaim(query, chatId, userId, data) {
     const checkId = data.split('_')[1];
     
-    db.get(`SELECT * FROM checks WHERE id = ? AND activations > 0`, [checkId], (err, row) => {
+    db.get(`SELECT * FROM checks WHERE id = ? AND activations > 0`, [checkId], async (err, row) => {
         if (err || !row) {
-            bot.answerCallbackQuery(query.id, { text: '❌ Чек использован!' });
+            await bot.answerCallbackQuery(query.id, { text: '❌ Чек использован!' });
             return;
         }
         
         // Обновляем баланс
         db.run(`UPDATE checks SET activations = activations - 1 WHERE id = ?`, [checkId]);
         db.run(`INSERT OR REPLACE INTO users (user_id, balance) VALUES (?, COALESCE((SELECT balance FROM users WHERE user_id = ?), 0) + ?)`, 
-            [userId, userId, row.amount], function(updateErr) {
+            [userId, userId, row.amount], async function(updateErr) {
             
             if (updateErr) {
-                bot.answerCallbackQuery(query.id, { text: '❌ Ошибка!' });
+                await bot.answerCallbackQuery(query.id, { text: '❌ Ошибка!' });
                 return;
             }
             
@@ -388,24 +394,30 @@ function handleCheckClaim(query, chatId, userId, data) {
             const botUsername = 'MyStarBank_bot';
             const deepLink = `https://t.me/${botUsername}?start=check_${checkId}`;
             
-            bot.sendMessage(userId,
-                `🎉 Чек успешно получен!\n\n` +
-                `💫 Получено: ${row.amount} stars\n` +
-                `💰 Ваш баланс: ${row.amount} stars\n\n` +
-                `📱 Для управления балансом перейдите в бота`,
-                {
-                    reply_markup: {
-                        inline_keyboard: [[
-                            { text: "📱 Перейти в бота", url: deepLink }
-                        ]]
+            try {
+                await bot.sendMessage(userId,
+                    `🎉 Чек успешно получен!\n\n` +
+                    `💫 Получено: ${row.amount} stars\n` +
+                    `💰 Ваш баланс: ${row.amount} stars\n\n` +
+                    `📱 Для управления балансом перейдите в бота`,
+                    {
+                        reply_markup: {
+                            inline_keyboard: [[
+                                { text: "📱 Перейти в бота", url: deepLink }
+                            ]]
+                        }
                     }
-                }
-            );
-            
-            bot.answerCallbackQuery(query.id, { text: `✅ +${row.amount} звёзд! Проверьте ЛС` });
-            
-            // Обновляем сообщение чека
-            updateCheckMessage(query, chatId, checkId, row.activations - 1);
+                );
+                
+                await bot.answerCallbackQuery(query.id, { text: `✅ +${row.amount} звёзд! Проверьте ЛС` });
+                
+                // Обновляем сообщение чека
+                updateCheckMessage(query, chatId, checkId, row.activations - 1);
+                
+            } catch (sendError) {
+                await bot.answerCallbackQuery(query.id, { text: `✅ +${row.amount} звёзд!` });
+                updateCheckMessage(query, chatId, checkId, row.activations - 1);
+            }
         });
     });
 }
@@ -424,14 +436,14 @@ function updateCheckMessage(query, chatId, checkId, remaining) {
                     message_id: query.message.message_id,
                     parse_mode: 'HTML',
                     reply_markup: replyMarkup
-                });
+                }).catch(e => console.log('Ошибка редактирования caption:', e));
             } else {
                 bot.editMessageText(updatedText, {
                     chat_id: chatId,
                     message_id: query.message.message_id,
                     parse_mode: 'HTML',
                     reply_markup: replyMarkup
-                });
+                }).catch(e => console.log('Ошибка редактирования text:', e));
             }
         } catch (error) {
             console.log('Ошибка обновления:', error);
