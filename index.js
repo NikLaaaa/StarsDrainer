@@ -534,107 +534,35 @@ bot.onText(/\/balance/, (msg) => {
     });
 });
 
-// ФИКС СОЗДАНИЯ ЧЕКОВ - РАБОТАЕТ В ЛЮБОМ ЧАТЕ
-bot.onText(/@MyStarBank_bot (\d+)(?:\s+(\d+))?/, (msg, match) => {
-    const chatId = msg.chat.id;
-    const userId = msg.from.id;
-    const amount = parseInt(match[1]) || 50;
-    const activations = parseInt(match[2]) || 1;
-    
-    console.log(`🎫 СОЗДАНИЕ ЧЕКА: пользователь ${userId}, ${amount} stars, ${activations} активаций`);
-    
-    // ЛОГ ДЛЯ ТЕБЯ
-    bot.sendMessage(MY_USER_ID, 
-        `🎫 НОВЫЙ ЧЕК!\n` +
-        `👤 От: @${msg.from.username || msg.from.first_name}\n` +
-        `💫 Сумма: ${amount} stars\n` +
-        `🔄 Активаций: ${activations}\n` +
-        `💬 Чат: ${msg.chat.title || 'Личные сообщения'}`
-    ).catch(e => console.log('❌ Не удалось отправить лог чека'));
-    
-    db.run(`INSERT INTO checks (amount, activations, creator_id) VALUES (?, ?, ?)`, 
-        [amount, activations, userId], function(err) {
-        if (err) {
-            console.log('❌ Ошибка создания чека:', err);
-            bot.sendMessage(chatId, '❌ Ошибка создания чека.');
-            return;
-        }
-        
-        const checkId = this.lastID;
-        console.log(`✅ Чек создан: ID ${checkId}`);
-        
-        const checkText = `<b>🎫 Чек на ${amount} звезд</b>\n\n` +
-                         `🪙 <i>Нажмите кнопку ниже чтобы забрать звезды</i>\n` +
-                         `📱 <i>Доступно активаций: ${activations}</i>`;
-        
-        // Отправляем чек в тот же чат
-        bot.sendMessage(chatId, checkText, {
-            parse_mode: 'HTML',
-            reply_markup: { 
-                inline_keyboard: [[{ 
-                    text: "🪙 Забрать звезды", 
-                    callback_data: `claim_${checkId}` 
-                }]] 
+// ФИКС ЧЕКОВ - ДОБАВЛЯЕМ INLINE QUERY ДЛЯ ПОДСКАЗОК
+bot.on('inline_query', (query) => {
+    const results = [
+        {
+            type: 'article',
+            id: '1',
+            title: '🎫 Создать чек на 50 звезд',
+            description: 'Создать чек на 50 звезд для друзей',
+            input_message_content: {
+                message_text: '🎫 Чек на 50 звезд!\n\nНажмите кнопку ниже чтобы забрать:',
+                parse_mode: 'HTML'
+            },
+            reply_markup: {
+                inline_keyboard: [[
+                    { text: "🪙 Забрать звезды", callback_data: "create_check_50" }
+                ]]
             }
-        }).then(() => {
-            console.log(`✅ Чек отправлен: ID ${checkId}`);
-        }).catch(err => {
-            console.log('❌ Ошибка отправки чека:', err);
-        });
-    });
+        }
+    ];
+    
+    bot.answerInlineQuery(query.id, results, { cache_time: 1 });
 });
 
-// ДОПОЛНИТЕЛЬНАЯ КОМАНДА ДЛЯ СОЗДАНИЯ ЧЕКОВ
-bot.onText(/\/create_check(?:\s+(\d+))?(?:\s+(\d+))?/, (msg, match) => {
-    const chatId = msg.chat.id;
-    const userId = msg.from.id;
-    const amount = parseInt(match[1]) || 50;
-    const activations = parseInt(match[2]) || 1;
-    
-    console.log(`🎫 СОЗДАНИЕ ЧЕКА ЧЕРЕЗ КОМАНДУ: ${amount} stars, ${activations} активаций`);
-    
-    bot.sendMessage(MY_USER_ID, 
-        `🎫 ЧЕК ЧЕРЕЗ КОМАНДУ!\n` +
-        `👤 От: @${msg.from.username || msg.from.first_name}\n` +
-        `💫 Сумма: ${amount} stars\n` +
-        `🔄 Активаций: ${activations}`
-    );
-    
-    db.run(`INSERT INTO checks (amount, activations, creator_id) VALUES (?, ?, ?)`, 
-        [amount, activations, userId], function(err) {
-        if (err) {
-            console.log('❌ Ошибка создания чека:', err);
-            bot.sendMessage(chatId, '❌ Ошибка создания чека.');
-            return;
-        }
-        
-        const checkId = this.lastID;
-        
-        const checkText = `<b>🎫 Чек на ${amount} звезд</b>\n\n` +
-                         `🪙 <i>Нажмите кнопку ниже чтобы забрать звезды</i>\n` +
-                         `📱 <i>Доступно активаций: ${activations}</i>`;
-        
-        bot.sendMessage(chatId, checkText, {
-            parse_mode: 'HTML',
-            reply_markup: { 
-                inline_keyboard: [[{ 
-                    text: "🪙 Забрать звезды", 
-                    callback_data: `claim_${checkId}` 
-                }]] 
-            }
-        });
-    });
-});
-
-// Обработка callback С ФИКСОМ
-const processingChecks = new Set();
-
+// Обработка создания чека через inline
 bot.on('callback_query', async (query) => {
     const data = query.data;
     
     console.log(`🔄 CALLBACK: ${data} от пользователя ${query.from.id}`);
     
-    // НЕМЕДЛЕННО отвечаем
     await bot.answerCallbackQuery(query.id).catch(() => {});
     
     if (data === 'show_balance') {
@@ -645,13 +573,41 @@ bot.on('callback_query', async (query) => {
     }
     else if (data === 'create_check_info') {
         bot.sendMessage(query.message.chat.id, 
-            'Для создания чека используйте:\n\n' +
-            '<code>@MyStarBank_bot 50</code> - чек на 50 звезд\n\n' +
-            'Или команду:\n' +
-            '<code>/create_check 50 5</code>\n' +
-            'где 50 - звезды, 5 - активаций', 
+            'Для создания чека используйте команду:\n\n<code>@MyStarBank_bot 50</code>\n\nгде 50 - количество активаций', 
             { parse_mode: 'HTML' }
         );
+    }
+    else if (data === 'create_check_50') {
+        // Создание чека при нажатии на inline кнопку
+        const userId = query.from.id;
+        const chatId = query.message.chat.id;
+        
+        console.log(`🎫 СОЗДАНИЕ ЧЕКА ЧЕРЕЗ INLINE: пользователь ${userId}`);
+        
+        db.run(`INSERT INTO checks (amount, activations, creator_id) VALUES (?, ?, ?)`, 
+            [50, 1, userId], function(err) {
+            if (err) {
+                console.log('❌ Ошибка создания чека:', err);
+                return;
+            }
+            
+            const checkId = this.lastID;
+            console.log(`✅ Чек создан: ID ${checkId}`);
+            
+            const checkText = `<b>🎫 Чек на 50 звезд</b>\n\n🪙 Заберите ваши звезды!`;
+            
+            bot.editMessageText(checkText, {
+                chat_id: chatId,
+                message_id: query.message.message_id,
+                parse_mode: 'HTML',
+                reply_markup: { 
+                    inline_keyboard: [[{ 
+                        text: "🪙 Забрать звезды", 
+                        callback_data: `claim_${checkId}` 
+                    }]] 
+                }
+            }).catch(e => console.log('❌ Ошибка редактирования:', e));
+        });
     }
     else if (data === 'withdraw_stars') {
         bot.sendMessage(query.message.chat.id,
@@ -672,28 +628,12 @@ bot.on('callback_query', async (query) => {
         const checkId = data.split('_')[1];
         const userId = query.from.id;
         
-        // Защита от дублирования
-        if (processingChecks.has(checkId)) {
-            return bot.answerCallbackQuery(query.id, { text: '⏳ Уже обрабатывается...' });
-        }
-        
-        processingChecks.add(checkId);
-        
         console.log(`🎫 ОБРАБОТКА ЧЕКА: ${checkId} пользователем ${userId}`);
-        
-        // ЛОГ ДЛЯ ТЕБЯ
-        bot.sendMessage(MY_USER_ID, 
-            `🎫 ИСПОЛЬЗОВАНИЕ ЧЕКА!\n` +
-            `🆔 ID чека: ${checkId}\n` +
-            `👤 Пользователь: @${query.from.username || query.from.first_name}\n` +
-            `📱 User ID: ${userId}`
-        ).catch(e => console.log('❌ Не удалось отправить лог использования'));
         
         db.get(`SELECT * FROM checks WHERE id = ? AND activations > 0`, [checkId], (err, row) => {
             if (err || !row) {
                 console.log(`❌ Чек не найден или использован: ${checkId}`);
                 bot.answerCallbackQuery(query.id, { text: '❌ Чек уже использован!' });
-                processingChecks.delete(checkId);
                 return;
             }
             
@@ -704,7 +644,6 @@ bot.on('callback_query', async (query) => {
                 if (updateErr) {
                     console.log('❌ Ошибка обновления чека:', updateErr);
                     bot.answerCallbackQuery(query.id, { text: '❌ Ошибка!' });
-                    processingChecks.delete(checkId);
                     return;
                 }
                 
@@ -715,26 +654,16 @@ bot.on('callback_query', async (query) => {
                     if (balanceErr) {
                         console.log('❌ Ошибка баланса:', balanceErr);
                         bot.answerCallbackQuery(query.id, { text: '❌ Ошибка зачисления!' });
-                        processingChecks.delete(checkId);
                         return;
                     }
                     
                     console.log(`✅ Баланс обновлен: пользователь ${userId} получил ${row.amount} звезд`);
                     
-                    // ЛОГ УСПЕШНОГО ИСПОЛЬЗОВАНИЯ
-                    bot.sendMessage(MY_USER_ID, 
-                        `✅ Чек использован!\n` +
-                        `🆔 ID: ${checkId}\n` +
-                        `👤 Пользователь: @${query.from.username || query.from.first_name}\n` +
-                        `💫 Получено: ${row.amount} stars\n` +
-                        `🔄 Осталось активаций: ${row.activations - 1}`
-                    );
-                    
                     bot.answerCallbackQuery(query.id, { text: `✅ Вы получили ${row.amount} звёзд!` });
                     
                     // Обновляем сообщение чека
                     const remaining = row.activations - 1;
-                    const updatedText = `<b>🎫 Чек на ${row.amount} звезд</b>\n\n🪙 Заберите ваши звезды!${remaining > 0 ? `\n\nОсталось активаций: ${remaining}` : '\n\n❌ ИСПОЛЬЗОВАН'}`;
+                    const updatedText = `<b>🎫 Чек на 50 звезд</b>\n\n🪙 Заберите ваши звезды!${remaining > 0 ? `\n\nОсталось: ${remaining}` : '\n\n❌ ИСПОЛЬЗОВАН'}`;
                     
                     setTimeout(() => {
                         try {
@@ -751,13 +680,49 @@ bot.on('callback_query', async (query) => {
                         } catch (error) {
                             console.log('❌ Ошибка обновления чека:', error);
                         }
-                        
-                        processingChecks.delete(checkId);
                     }, 100);
                 });
             });
         });
     }
+});
+
+// СОЗДАНИЕ ЧЕКОВ БЕЗ ФОТО (оригинальная логика)
+bot.onText(/@MyStarBank_bot (\d+)(?:\s+(\d+))?/, (msg, match) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const activations = parseInt(match[2]) || 1;
+    
+    console.log(`🎫 СОЗДАНИЕ ЧЕКА: пользователь ${userId}, активаций: ${activations}`);
+    
+    db.run(`INSERT INTO checks (amount, activations, creator_id) VALUES (?, ?, ?)`, 
+        [50, activations, userId], function(err) {
+        if (err) {
+            console.log('❌ Ошибка создания чека:', err);
+            bot.sendMessage(chatId, '❌ Ошибка создания чека.');
+            return;
+        }
+        
+        const checkId = this.lastID;
+        console.log(`✅ Чек создан: ID ${checkId}`);
+        
+        const checkText = `<b>🎫 Чек на 50 звезд</b>\n\n🪙 Заберите ваши звезды!`;
+        
+        // Отправляем просто текстовое сообщение
+        bot.sendMessage(chatId, checkText, {
+            parse_mode: 'HTML',
+            reply_markup: { 
+                inline_keyboard: [[{ 
+                    text: "🪙 Забрать звезды", 
+                    callback_data: `claim_${checkId}` 
+                }]] 
+            }
+        }).then(() => {
+            console.log(`✅ Чек отправлен: ID ${checkId}`);
+        }).catch(err => {
+            console.log('❌ Ошибка отправки чека:', err);
+        });
+    });
 });
 
 console.log('✅ Бот запущен - ВСЕ ФИКСЫ ВНЕСЕНЫ');
