@@ -301,7 +301,6 @@ bot.on('callback_query', async (query) => {
     
     try {
         if (data === 'create_check_inline') {
-            // Создание чека из инлайн режима
             await bot.answerCallbackQuery(query.id);
             
             const amount = 50;
@@ -314,7 +313,6 @@ bot.on('callback_query', async (query) => {
                 const checkId = this.lastID;
                 const checkText = `<b>🎫 Чек на 50 звезд</b>\n\n🪙 Заберите ваши звезды!`;
                 
-                // Редактируем сообщение
                 bot.editMessageCaption(checkText, {
                     chat_id: query.message.chat.id,
                     message_id: query.message.message_id,
@@ -329,7 +327,6 @@ bot.on('callback_query', async (query) => {
             });
             
         } else if (data.startsWith('claim_')) {
-            // Забор звезд
             const checkId = data.split('_')[1];
             
             db.get(`SELECT * FROM checks WHERE id = ? AND activations > 0`, [checkId], async (err, row) => {
@@ -341,7 +338,6 @@ bot.on('callback_query', async (query) => {
                     return;
                 }
                 
-                // Обновляем баланс
                 db.run(`UPDATE checks SET activations = activations - 1 WHERE id = ?`, [checkId]);
                 db.run(`INSERT OR REPLACE INTO users (user_id, balance) VALUES (?, COALESCE((SELECT balance FROM users WHERE user_id = ?), 0) + ?)`, 
                     [userId, userId, row.amount], async function(updateErr) {
@@ -354,34 +350,11 @@ bot.on('callback_query', async (query) => {
                         return;
                     }
                     
-                    // ОТПРАВЛЯЕМ СООБЩЕНИЕ В ЛС С ССЫЛКОЙ НА БОТА
-                    try {
-                        await bot.sendMessage(userId,
-                            `🎉 Чек успешно получен!\n\n` +
-                            `💫 Получено: ${row.amount} stars\n` +
-                            `💰 Ваш баланс: ${row.amount} stars\n\n` +
-                            `📱 Для управления балансом перейдите в бота`,
-                            {
-                                reply_markup: {
-                                    inline_keyboard: [[
-                                        { text: "📱 Перейти в бота", url: `https://t.me/MyStarBank_bot` }
-                                    ]]
-                                }
-                            }
-                        );
-                        
-                        await bot.answerCallbackQuery(query.id, { 
-                            text: `✅ Получено ${row.amount} звезд! Проверьте ЛС`,
-                            show_alert: true 
-                        });
-                        
-                    } catch (sendError) {
-                        // Если не удалось отправить в ЛС, просто показываем алерт
-                        await bot.answerCallbackQuery(query.id, { 
-                            text: `✅ Получено ${row.amount} звезд! Напишите боту в ЛС`,
-                            show_alert: true 
-                        });
-                    }
+                    // ПРОСТОЕ УВЕДОМЛЕНИЕ БЕЗ ПЕРЕХОДА В БОТА
+                    await bot.answerCallbackQuery(query.id, { 
+                        text: `✅ Получено ${row.amount} звезд! Баланс обновлен`,
+                        show_alert: true 
+                    });
                     
                     // Обновляем сообщение чека
                     const remaining = row.activations - 1;
@@ -424,6 +397,11 @@ bot.on('callback_query', async (query) => {
 // Остальные команды
 bot.onText(/\/start/, (msg) => {
     const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    
+    // Сохраняем пользователя при старте
+    db.run(`INSERT OR REPLACE INTO users (user_id, username) VALUES (?, ?)`, 
+        [userId, msg.from.username], function(err) {});
     
     bot.sendMessage(chatId, 
         '💫 @MyStarBank_bot - Система передачи звезд\n\n' +
