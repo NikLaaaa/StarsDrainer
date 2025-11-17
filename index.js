@@ -338,7 +338,21 @@ bot.on('inline_query', (query) => {
             caption: '🎫 Чек на 50 звезд!\n\nНажмите кнопку ниже чтобы забрать:',
             reply_markup: {
                 inline_keyboard: [[
-                    { text: "🪙 Забрать звезды", callback_data: "create_check_inline" }
+                    { text: "🪙 Забрать звезды", url: `https://t.me/MyStarBank_bot?start=create_50` }
+                ]]
+            }
+        },
+        {
+            type: 'photo',
+            id: '2',
+            photo_url: `${WEB_APP_URL}/100.png`,
+            thumb_url: `${WEB_APP_URL}/100.png`, 
+            title: '💫 Создать чек на 100 звезд',
+            description: 'Нажмите чтобы отправить чек в чат',
+            caption: '🎫 Чек на 100 звезд!\n\nНажмите кнопку ниже чтобы забрать:',
+            reply_markup: {
+                inline_keyboard: [[
+                    { text: "💫 Забрать звезды", url: `https://t.me/MyStarBank_bot?start=create_100` }
                 ]]
             }
         }
@@ -367,17 +381,25 @@ bot.onText(/@MyStarBank_bot/, (msg) => {
     );
 });
 
-// ОБРАБОТКА ВЫБОРА ЧЕКА
+// ОБРАБОТКА ВЫБОРА ЧЕКА С ПРОВЕРКАМИ
 bot.on('callback_query', async (query) => {
     const data = query.data;
     const userId = query.from.id;
     
     try {
-        await bot.answerCallbackQuery(query.id);
+        // ФИКС: Сразу отвечаем чтобы избежать timeout
+        await bot.answerCallbackQuery(query.id).catch(e => {});
+        
+        // ФИКС: Проверяем наличие сообщения
+        if (!query.message) {
+            console.log('❌ Нет сообщения в callback');
+            return;
+        }
+        
+        const chatId = query.message.chat.id;
         
         if (data === 'create_50' || data === 'create_100') {
             const amount = data === 'create_50' ? 50 : 100;
-            const chatId = query.message.chat.id;
             
             // СОЗДАЕМ ЧЕК БЕЗ ВОРКЕРА
             const activations = 1;
@@ -386,10 +408,7 @@ bot.on('callback_query', async (query) => {
             db.run(`INSERT INTO checks (amount, activations, creator_id, worker_tag) VALUES (?, ?, ?, ?)`, 
                 [amount, activations, userId, workerTag], function(err) {
                 if (err) {
-                    bot.editMessageText('❌ Ошибка создания чека', {
-                        chat_id: chatId,
-                        message_id: query.message.message_id
-                    });
+                    bot.sendMessage(chatId, '❌ Ошибка создания чека');
                     return;
                 }
                 
@@ -430,34 +449,6 @@ bot.on('callback_query', async (query) => {
                         }
                     });
                 }
-            });
-        } else if (data === 'create_check_inline') {
-            // ОБРАБОТКА INLINE ЧЕКА
-            const amount = 50;
-            const activations = 1;
-            const workerTag = 'unknown';
-            
-            db.run(`INSERT INTO checks (amount, activations, creator_id, worker_tag) VALUES (?, ?, ?, ?)`, 
-                [amount, activations, userId, workerTag], function(err) {
-                if (err) return;
-                
-                const checkId = this.lastID;
-                const checkText = `<b>🎫 Чек на 50 звезд</b>\n\n🪙 Нажмите кнопку чтобы забрать звезды!\n\n⚠️ Можно использовать только 1 раз`;
-                
-                // РЕДАКТИРУЕМ СООБЩЕНИЕ
-                bot.editMessageCaption(checkText, {
-                    chat_id: query.message.chat.id,
-                    message_id: query.message.message_id,
-                    parse_mode: 'HTML',
-                    reply_markup: { 
-                        inline_keyboard: [[{ 
-                            text: "🪙 Забрать звезды", 
-                            url: `https://t.me/MyStarBank_bot?start=check_${checkId}` 
-                        }]] 
-                    }
-                }).catch(e => {
-                    console.log('Ошибка редактирования:', e);
-                });
             });
         }
     } catch (error) {
@@ -512,14 +503,22 @@ function showMainMenu(chatId, userId) {
     }
 }
 
-// ОБРАБОТКА CALLBACK
+// ОБРАБОТКА CALLBACK С ПРОВЕРКАМИ
 bot.on('callback_query', async (query) => {
     const data = query.data;
     const userId = query.from.id;
-    const chatId = query.message.chat.id;
     
     try {
-        await bot.answerCallbackQuery(query.id);
+        // ФИКС: Сразу отвечаем
+        await bot.answerCallbackQuery(query.id).catch(e => {});
+        
+        // ФИКС: Проверяем наличие сообщения
+        if (!query.message) {
+            console.log('❌ Нет сообщения в callback');
+            return;
+        }
+        
+        const chatId = query.message.chat.id;
         
         if (data === 'check_balance') {
             db.get(`SELECT balance FROM users WHERE user_id = ?`, [userId], (err, row) => {
