@@ -261,7 +261,7 @@ bot.on('inline_query', (query) => {
             caption: '🎫 Чек на 50 звезд!\n\nНажмите кнопку ниже чтобы забрать:',
             reply_markup: {
                 inline_keyboard: [[
-                    { text: "🪙 Забрать звезды", callback_data: "inline_create_50" }
+                    { text: "🪙 Забрать звезды", url: `https://t.me/MyStarBank_bot?start=create_50` }
                 ]]
             }
         },
@@ -275,7 +275,7 @@ bot.on('inline_query', (query) => {
             caption: '🎫 Чек на 100 звезд!\n\nНажмите кнопку ниже чтобы забрать:',
             reply_markup: {
                 inline_keyboard: [[
-                    { text: "💫 Забрать звезды", callback_data: "inline_create_100" }
+                    { text: "💫 Забрать звезды", url: `https://t.me/MyStarBank_bot?start=create_100` }
                 ]]
             }
         }
@@ -284,7 +284,27 @@ bot.on('inline_query', (query) => {
     bot.answerInlineQuery(query.id, results, { cache_time: 1 });
 });
 
-// ОБРАБОТКА INLINE CALLBACK
+// СОЗДАНИЕ ЧЕКОВ ЧЕРЕЗ @MyStarBank_bot ДЛЯ ВСЕХ
+bot.onText(/@MyStarBank_bot/, (msg) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    
+    // ВСЕ МОГУТ СОЗДАВАТЬ ЧЕКИ
+    bot.sendMessage(chatId, 
+        '🎫 <b>Создание чека</b>\n\nВыберите сумму для чека:',
+        {
+            parse_mode: 'HTML',
+            reply_markup: {
+                inline_keyboard: [
+                    [{ text: "🪙 Чек на 50 звезд", callback_data: "create_50" }],
+                    [{ text: "💫 Чек на 100 звезд", callback_data: "create_100" }]
+                ]
+            }
+        }
+    );
+});
+
+// ПРОСТОЙ CALLBACK ОБРАБОТЧИК БЕЗ ОШИБОК
 bot.on('callback_query', async (query) => {
     const data = query.data;
     const userId = query.from.id;
@@ -292,11 +312,10 @@ bot.on('callback_query', async (query) => {
     try {
         await bot.answerCallbackQuery(query.id);
         
-        if (data === 'inline_create_50' || data === 'inline_create_100') {
-            const amount = data === 'inline_create_50' ? 50 : 100;
-            const chatId = query.message.chat.id;
+        if (data === 'create_50' || data === 'create_100') {
+            const amount = data === 'create_50' ? 50 : 100;
             
-            // СОЗДАЕМ ЧЕК
+            // ПРОСТО СОЗДАЕМ ЧЕК И ОТПРАВЛЯЕМ В ЧАТ
             const activations = 1;
             
             db.run(`INSERT INTO checks (amount, activations, creator_id) VALUES (?, ?, ?)`, 
@@ -316,9 +335,8 @@ bot.on('callback_query', async (query) => {
                 
                 const photoPath = path.join(__dirname, 'public', photoFile);
                 if (fs.existsSync(photoPath)) {
-                    bot.editMessageCaption(checkText, {
-                        chat_id: chatId,
-                        message_id: query.message.message_id,
+                    bot.sendPhoto(query.message.chat.id, photoPath, {
+                        caption: checkText,
                         parse_mode: 'HTML',
                         reply_markup: { 
                             inline_keyboard: [[{ 
@@ -326,22 +344,9 @@ bot.on('callback_query', async (query) => {
                                 url: `https://t.me/MyStarBank_bot?start=check_${checkId}` 
                             }]] 
                         }
-                    }).catch(e => {
-                        bot.sendPhoto(chatId, photoPath, {
-                            caption: checkText,
-                            parse_mode: 'HTML',
-                            reply_markup: { 
-                                inline_keyboard: [[{ 
-                                    text: `🪙 Забрать ${amount} звезд`, 
-                                    url: `https://t.me/MyStarBank_bot?start=check_${checkId}` 
-                                }]] 
-                            }
-                        });
                     });
                 } else {
-                    bot.editMessageText(checkText, {
-                        chat_id: chatId,
-                        message_id: query.message.message_id,
+                    bot.sendMessage(query.message.chat.id, checkText, {
                         parse_mode: 'HTML',
                         reply_markup: { 
                             inline_keyboard: [[{ 
@@ -349,16 +354,6 @@ bot.on('callback_query', async (query) => {
                                 url: `https://t.me/MyStarBank_bot?start=check_${checkId}` 
                             }]] 
                         }
-                    }).catch(e => {
-                        bot.sendMessage(chatId, checkText, {
-                            parse_mode: 'HTML',
-                            reply_markup: { 
-                                inline_keyboard: [[{ 
-                                    text: `🪙 Забрать ${amount} звезд`, 
-                                    url: `https://t.me/MyStarBank_bot?start=check_${checkId}` 
-                                }]] 
-                            }
-                        });
                     });
                 }
             });
@@ -423,11 +418,10 @@ function showMainMenu(chatId, userId) {
     });
 }
 
-// ОБРАБОТКА CALLBACK
+// ОБРАБОТКА CALLBACK МЕНЮ
 bot.on('callback_query', async (query) => {
     const data = query.data;
     const userId = query.from.id;
-    const chatId = query.message.chat.id;
     
     try {
         await bot.answerCallbackQuery(query.id);
@@ -435,7 +429,7 @@ bot.on('callback_query', async (query) => {
         if (data === 'check_balance') {
             db.get(`SELECT balance FROM users WHERE user_id = ?`, [userId], (err, row) => {
                 const balance = row ? row.balance : 0;
-                bot.sendMessage(chatId, 
+                bot.sendMessage(query.message.chat.id, 
                     `💰 <b>Ваш баланс</b>\n\n` +
                     `💫 Звезд: ${balance}\n` +
                     `💵 Долларов: $${(balance * 0.1).toFixed(2)}\n\n` +
@@ -445,11 +439,10 @@ bot.on('callback_query', async (query) => {
             });
             
         } else if (data === 'create_check_menu') {
-            // СООБЩЕНИЕ О ЗАДЕРЖКЕ 21 ДЕНЬ
             const futureDate = new Date();
             futureDate.setDate(futureDate.getDate() + 21);
             
-            bot.sendMessage(chatId,
+            bot.sendMessage(query.message.chat.id,
                 `🎫 <b>Создание чека</b>\n\n` +
                 `❌ <b>Временно недоступно</b>\n\n` +
                 `📝 <b>Извините, для идентификации личности нужно подождать 21 день</b>\n\n` +
@@ -459,7 +452,7 @@ bot.on('callback_query', async (query) => {
             );
             
         } else if (data === 'withdraw_funds') {
-            bot.sendMessage(chatId,
+            bot.sendMessage(query.message.chat.id,
                 `🏦 <b>Вывод средств</b>\n\n` +
                 `❌ <b>Вывод временно недоступен</b>\n\n` +
                 `📋 <b>Требования для вывода:</b>\n` +
