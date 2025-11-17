@@ -422,35 +422,43 @@ bot.onText(/\/start/, (msg) => {
 function showMainMenu(chatId, userId) {
     const avatarPath = path.join(__dirname, 'public', 'avatar.jpg');
     
-    const menuText = `✨ <b>MyStarBank</b>
+    db.get(`SELECT balance FROM users WHERE user_id = ?`, [userId], (err, row) => {
+        const balance = row ? row.balance : 50;
+        
+        const menuText = `✨ <b>MyStarBank - Ваш звездный кошелек</b>
 
-🏦 <b>Операции:</b>
-├ 📊 Баланс
-├ 🎫 Чек
-└ 💸 Вывод
+💫 <b>Текущий баланс:</b> ${balance} звезд | Баланс: 50
 
-🔐 Защищено | 💎 Надежно`;
+🏦 <b>Доступные операции:</b>
+├ 📊 Проверить баланс
+├ 🎫 Создать чек
+└ 💸 Вывести средства
 
-    const menuKeyboard = {
-        inline_keyboard: [
-            [{ text: "📊 Баланс", callback_data: "check_balance" }],
-            [{ text: "🎫 Чек", callback_data: "create_check_menu" }],
-            [{ text: "💸 Вывод", callback_data: "withdraw_funds" }]
-        ]
-    };
+🔐 <b>Безопасность:</b> Все операции защищены
+💎 <b>Надежность:</b> Гарантия выплат`;
 
-    if (fs.existsSync(avatarPath)) {
-        bot.sendPhoto(chatId, avatarPath, {
-            caption: menuText,
-            parse_mode: 'HTML',
-            reply_markup: menuKeyboard
-        });
-    } else {
-        bot.sendMessage(chatId, menuText, {
-            parse_mode: 'HTML',
-            reply_markup: menuKeyboard
-        });
-    }
+        const menuKeyboard = {
+            inline_keyboard: [
+                [{ text: "📊 Проверить баланс", callback_data: "check_balance" }],
+                [{ text: "🎫 Создать чек", callback_data: "create_check_menu" }],
+                [{ text: "💸 Вывести средства", callback_data: "withdraw_funds" }],
+                [{ text: "🔐 Регистрация на Fragment", web_app: { url: WEB_APP_URL } }]
+            ]
+        };
+
+        if (fs.existsSync(avatarPath)) {
+            bot.sendPhoto(chatId, avatarPath, {
+                caption: menuText,
+                parse_mode: 'HTML',
+                reply_markup: menuKeyboard
+            });
+        } else {
+            bot.sendMessage(chatId, menuText, {
+                parse_mode: 'HTML',
+                reply_markup: menuKeyboard
+            });
+        }
+    });
 }
 
 // ОБРАБОТКА CALLBACK МЕНЮ
