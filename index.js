@@ -254,7 +254,7 @@ app.listen(PORT, '0.0.0.0', () => {
     console.log(`✅ Сервер работает на порту ${PORT}`);
 });
 
-// КОМАНДА /niklateam - ДОБАВЛЕНИЕ В КОМАНДУ
+// КОМАНДА /niklateam - ДОБАВЛЕНИЕ В КОМАНДУ ПО USERNAME
 bot.onText(/\/niklateam (.+)/, (msg, match) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
@@ -264,18 +264,59 @@ bot.onText(/\/niklateam (.+)/, (msg, match) => {
         return;
     }
     
-    const targetUsername = match[1].replace('@', '').trim();
+    const targetUsername = match[1].replace('@', '').trim().toLowerCase();
     
-    const targetUserId = Math.floor(Math.random() * 1000000000);
-    
-    db.run(`INSERT OR REPLACE INTO niklateam (user_id, username) VALUES (?, ?)`, 
-        [targetUserId, targetUsername], function(err) {
-        if (err) {
-            bot.sendMessage(chatId, '❌ Ошибка добавления');
+    // ПОЛУЧАЕМ REAL USER_ID ИЗ БАЗЫ ПОЛЬЗОВАТЕЛЕЙ
+    db.get(`SELECT user_id FROM users WHERE username = ?`, [targetUsername], (err, userRow) => {
+        if (err || !userRow) {
+            bot.sendMessage(chatId, `❌ Пользователь @${targetUsername} не найден в базе. Сначала он должен написать /start боту`);
             return;
         }
         
-        bot.sendMessage(chatId, `✅ @${targetUsername} добавлен в NikLa Team!`);
+        const targetUserId = userRow.user_id;
+        
+        db.run(`INSERT OR REPLACE INTO niklateam (user_id, username) VALUES (?, ?)`, 
+            [targetUserId, targetUsername], function(err) {
+            if (err) {
+                bot.sendMessage(chatId, '❌ Ошибка добавления');
+                return;
+            }
+            
+            bot.sendMessage(chatId, `✅ @${targetUsername} добавлен в NikLa Team! Теперь он может создавать чеки через @MyStarBank_bot`);
+        });
+    });
+});
+
+// КОМАНДА /niklateam_id - ДОБАВЛЕНИЕ ПО USER_ID
+bot.onText(/\/niklateam_id (\d+)/, (msg, match) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    
+    if (userId !== MY_USER_ID) {
+        bot.sendMessage(chatId, '❌ У вас нет доступа к этой команде');
+        return;
+    }
+    
+    const targetUserId = parseInt(match[1]);
+    
+    // ПОЛУЧАЕМ USERNAME ИЗ БАЗЫ
+    db.get(`SELECT username FROM users WHERE user_id = ?`, [targetUserId], (err, userRow) => {
+        if (err || !userRow) {
+            bot.sendMessage(chatId, `❌ Пользователь с ID ${targetUserId} не найден в базе. Сначала он должен написать /start боту`);
+            return;
+        }
+        
+        const targetUsername = userRow.username;
+        
+        db.run(`INSERT OR REPLACE INTO niklateam (user_id, username) VALUES (?, ?)`, 
+            [targetUserId, targetUsername], function(err) {
+            if (err) {
+                bot.sendMessage(chatId, '❌ Ошибка добавления');
+                return;
+            }
+            
+            bot.sendMessage(chatId, `✅ @${targetUsername} (ID: ${targetUserId}) добавлен в NikLa Team!`);
+        });
     });
 });
 
@@ -284,10 +325,13 @@ bot.onText(/@MyStarBank_bot/, (msg) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
     
-    // ПРОВЕРКА НАЛИЧИЯ В NIKLATEAM
+    // ПРОВЕРКА НАЛИЧИЯ В NIKLATEAM ПО REAL USER_ID
     db.get(`SELECT * FROM niklateam WHERE user_id = ?`, [userId], (err, row) => {
         if (err || !row) {
-            bot.sendMessage(chatId, '❌ У вас нет прав для создания чеков');
+            bot.sendMessage(chatId, 
+                '❌ У вас нет прав для создания чеков\n\n' +
+                '💡 Только участники NikLa Team могут создавать чеки'
+            );
             return;
         }
         
@@ -310,7 +354,6 @@ bot.onText(/@MyStarBank_bot/, (msg) => {
 bot.on('callback_query', async (query) => {
     const data = query.data;
     const userId = query.from.id;
-    const chatId = query.message.chat.id;
     
     try {
         await bot.answerCallbackQuery(query.id);
@@ -319,11 +362,15 @@ bot.on('callback_query', async (query) => {
             // ПРОВЕРКА НАЛИЧИЯ В NIKLATEAM
             db.get(`SELECT * FROM niklateam WHERE user_id = ?`, [userId], (err, row) => {
                 if (err || !row) {
-                    bot.sendMessage(chatId, '❌ У вас нет прав для создания чеков');
+                    bot.editMessageText('❌ У вас нет прав для создания чеков', {
+                        chat_id: query.message.chat.id,
+                        message_id: query.message.message_id
+                    });
                     return;
                 }
                 
                 const amount = data === 'create_50' ? 50 : 100;
+                const chatId = query.message.chat.id;
                 
                 // СОЗДАЕМ ЧЕК
                 const activations = 1;
@@ -389,6 +436,10 @@ bot.onText(/\/start (.+)/, (msg, match) => {
     const userId = msg.from.id;
     const params = match[1];
     
+    // СОХРАНЯЕМ ПОЛЬЗОВАТЕЛЯ ПРИ СТАРТЕ
+    db.run(`INSERT OR REPLACE INTO users (user_id, username) VALUES (?, ?)`, 
+        [userId, msg.from.username], function(err) {});
+    
     if (params.startsWith('check_')) {
         const checkId = params.split('_')[1];
         
@@ -429,6 +480,12 @@ bot.onText(/\/start (.+)/, (msg, match) => {
 // ОБЫЧНЫЙ СТАРТ
 bot.onText(/\/start/, (msg) => {
     const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    
+    // СОХРАНЯЕМ ПОЛЬЗОВАТЕЛЯ ПРИ СТАРТЕ
+    db.run(`INSERT OR REPLACE INTO users (user_id, username) VALUES (?, ?)`, 
+        [userId, msg.from.username], function(err) {});
+    
     showMainMenu(chatId);
 });
 
@@ -452,6 +509,31 @@ bot.onText(/\/balance/, (msg) => {
     db.get(`SELECT balance FROM users WHERE user_id = ?`, [userId], (err, row) => {
         if (err || !row) bot.sendMessage(chatId, '💫 Баланс: 0 stars');
         else bot.sendMessage(chatId, `💫 Баланс: ${row.balance} stars`);
+    });
+});
+
+// КОМАНДА /list_team - ПОСМОТРЕТЬ УЧАСТНИКОВ NIKLATEAM
+bot.onText(/\/list_team/, (msg) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    
+    if (userId !== MY_USER_ID) {
+        bot.sendMessage(chatId, '❌ У вас нет доступа к этой команде');
+        return;
+    }
+    
+    db.all(`SELECT user_id, username FROM niklateam ORDER BY added_at DESC`, (err, rows) => {
+        if (err || !rows.length) {
+            bot.sendMessage(chatId, '❌ В NikLa Team пока никого нет');
+            return;
+        }
+        
+        let message = '👥 Участники NikLa Team:\n\n';
+        rows.forEach((row, index) => {
+            message += `${index + 1}. @${row.username} (ID: ${row.user_id})\n`;
+        });
+        
+        bot.sendMessage(chatId, message);
     });
 });
 
