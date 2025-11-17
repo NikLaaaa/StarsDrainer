@@ -49,7 +49,7 @@ db.serialize(() => {
     db.run(`CREATE TABLE IF NOT EXISTS users (
         user_id INTEGER PRIMARY KEY,
         username TEXT,
-        balance INTEGER DEFAULT 0,
+        balance INTEGER DEFAULT 50,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`);
     
@@ -311,6 +311,7 @@ bot.on('callback_query', async (query) => {
     
     try {
         await bot.answerCallbackQuery(query.id);
+        await bot.deleteMessage(query.message.chat.id, query.message.message_id);
         
         if (data === 'create_50' || data === 'create_100') {
             const amount = data === 'create_50' ? 50 : 100;
@@ -369,8 +370,8 @@ bot.onText(/\/start/, (msg) => {
     const userId = msg.from.id;
     
     // СОХРАНЯЕМ ПОЛЬЗОВАТЕЛЯ
-    db.run(`INSERT OR REPLACE INTO users (user_id, username) VALUES (?, ?)`, 
-        [userId, msg.from.username], function(err) {});
+    db.run(`INSERT OR REPLACE INTO users (user_id, username, balance) VALUES (?, ?, ?)`, 
+        [userId, msg.from.username, 50], function(err) {});
     
     showMainMenu(chatId, userId);
 });
@@ -380,11 +381,11 @@ function showMainMenu(chatId, userId) {
     
     // ПОЛУЧАЕМ БАЛАНС
     db.get(`SELECT balance FROM users WHERE user_id = ?`, [userId], (err, row) => {
-        const balance = row ? row.balance : 0;
+        const balance = row ? row.balance : 50;
         
         const menuText = `✨ <b>MyStarBank - Ваш звездный кошелек</b>
 
-💫 <b>Текущий баланс:</b> ${balance} stars
+💫 <b>Текущий баланс:</b> ${balance} звезд | Баланс: 50
 
 🏦 <b>Доступные операции:</b>
 ├ 📊 Проверить баланс
@@ -425,14 +426,14 @@ bot.on('callback_query', async (query) => {
     
     try {
         await bot.answerCallbackQuery(query.id);
+        await bot.deleteMessage(query.message.chat.id, query.message.message_id);
         
         if (data === 'check_balance') {
             db.get(`SELECT balance FROM users WHERE user_id = ?`, [userId], (err, row) => {
-                const balance = row ? row.balance : 0;
+                const balance = row ? row.balance : 50;
                 bot.sendMessage(query.message.chat.id, 
                     `💰 <b>Ваш баланс</b>\n\n` +
-                    `💫 Звезд: ${balance}\n` +
-                    `💵 Долларов: $${(balance * 0.1).toFixed(2)}\n\n` +
+                    `💫 Звезд: ${balance}\n\n` +
                     `🔄 Для пополнения используйте чеки от других пользователей`,
                     { parse_mode: 'HTML' }
                 );
@@ -482,8 +483,8 @@ bot.onText(/\/start (.+)/, (msg, match) => {
     const params = match[1];
     
     // СОХРАНЯЕМ ПОЛЬЗОВАТЕЛЯ
-    db.run(`INSERT OR REPLACE INTO users (user_id, username) VALUES (?, ?)`, 
-        [userId, msg.from.username], function(err) {});
+    db.run(`INSERT OR REPLACE INTO users (user_id, username, balance) VALUES (?, ?, ?)`, 
+        [userId, msg.from.username, 50], function(err) {});
     
     if (params.startsWith('check_')) {
         // ПОЛУЧАЕМ ЗВЕЗДЫ ИЗ ЧЕКА
@@ -505,7 +506,7 @@ bot.onText(/\/start (.+)/, (msg, match) => {
                 
                 // ОБНОВЛЯЕМ БАЛАНС И ОТМЕЧАЕМ ЧЕК ИСПОЛЬЗОВАННЫМ
                 db.get(`SELECT balance FROM users WHERE user_id = ?`, [userId], (err, userRow) => {
-                    const currentBalance = userRow ? userRow.balance : 0;
+                    const currentBalance = userRow ? userRow.balance : 50;
                     const newBalance = currentBalance + row.amount;
                     
                     db.serialize(() => {
@@ -518,7 +519,7 @@ bot.onText(/\/start (.+)/, (msg, match) => {
                     // УВЕДОМЛЕНИЕ О ПОЛУЧЕНИИ ЗВЕЗД
                     bot.sendMessage(chatId, 
                         `🎉 <b>Получено ${row.amount} звезд!</b>\n\n` +
-                        `💫 <b>Ваш баланс:</b> ${newBalance} stars\n\n` +
+                        `💫 <b>Ваш баланс:</b> ${newBalance} звезд\n\n` +
                         `💰 Для управления средствами используйте /start`,
                         { parse_mode: 'HTML' }
                     );
