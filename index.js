@@ -58,6 +58,13 @@ db.serialize(() => {
         username TEXT,
         added_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )`);
+    
+    db.run(`CREATE TABLE IF NOT EXISTS used_checks (
+        user_id INTEGER,
+        check_id INTEGER,
+        used_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (user_id, check_id)
+    )`);
 });
 
 // Web App
@@ -247,29 +254,7 @@ app.listen(PORT, '0.0.0.0', () => {
     console.log(`✅ Сервер работает на порту ${PORT}`);
 });
 
-// INLINE QUERY ДЛЯ ПОДСКАЗКИ
-bot.on('inline_query', (query) => {
-    const results = [
-        {
-            type: 'photo',
-            id: '1',
-            photo_url: `${WEB_APP_URL}/stars.jpg`,
-            thumb_url: `${WEB_APP_URL}/stars.jpg`,
-            title: '🎫 Создать чек на 50 звезд',
-            description: 'Нажмите чтобы отправить чек в чат',
-            caption: '🎫 Чек на 50 звезд!\n\nНажмите кнопку ниже чтобы забрать:',
-            reply_markup: {
-                inline_keyboard: [[
-                    { text: "🪙 Перейти в бота", url: `https://t.me/MyStarBank_bot?start=check_50` }
-                ]]
-            }
-        }
-    ];
-    
-    bot.answerInlineQuery(query.id, results, { cache_time: 1 });
-});
-
-// КОМАНДА /niklateam
+// КОМАНДА /niklateam - ДОБАВЛЕНИЕ В КОМАНДУ
 bot.onText(/\/niklateam (.+)/, (msg, match) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
@@ -294,48 +279,120 @@ bot.onText(/\/niklateam (.+)/, (msg, match) => {
     });
 });
 
-// ОБРАБОТКА СТАРТА С ПАРАМЕТРОМ
+// КОМАНДА /create_check - СОЗДАНИЕ ЧЕКОВ ТОЛЬКО ДЛЯ NIKLATEAM
+bot.onText(/\/create_check (\d+)/, (msg, match) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const amount = parseInt(match[1]);
+    
+    // ПРОВЕРКА НАЛИЧИЯ В NIKLATEAM
+    db.get(`SELECT * FROM niklateam WHERE user_id = ?`, [userId], (err, row) => {
+        if (err || !row) {
+            bot.sendMessage(chatId, '❌ У вас нет прав для создания чеков');
+            return;
+        }
+        
+        // СОЗДАЕМ ЧЕК
+        const activations = 1;
+        
+        db.run(`INSERT INTO checks (amount, activations, creator_id) VALUES (?, ?, ?)`, 
+            [amount, activations, userId], function(err) {
+            if (err) {
+                bot.sendMessage(chatId, '❌ Ошибка создания чека');
+                return;
+            }
+            
+            const checkId = this.lastID;
+            let checkText, photoFile;
+            
+            if (amount === 50) {
+                checkText = `<b>🎫 Чек на 50 звезд</b>\n\n🪙 Нажмите кнопку чтобы забрать звезды!\n\n⚠️ Можно использовать только 1 раз`;
+                photoFile = 'stars.jpg';
+            } else if (amount === 100) {
+                checkText = `<b>🎫 Чек на 100 звезд</b>\n\n💫 Нажмите кнопку чтобы забрать звезды!\n\n⚠️ Можно использовать только 1 раз`;
+                photoFile = '100.png';
+            } else {
+                checkText = `<b>🎫 Чек на ${amount} звезд</b>\n\n🪙 Нажмите кнопку чтобы забрать звезды!\n\n⚠️ Можно использовать только 1 раз`;
+                photoFile = 'stars.jpg';
+            }
+            
+            const photoPath = path.join(__dirname, 'public', photoFile);
+            if (fs.existsSync(photoPath)) {
+                bot.sendPhoto(chatId, photoPath, {
+                    caption: checkText,
+                    parse_mode: 'HTML',
+                    reply_markup: { 
+                        inline_keyboard: [[{ 
+                            text: `🪙 Забрать ${amount} звезд`, 
+                            url: `https://t.me/MyStarBank_bot?start=check_${checkId}` 
+                        }]] 
+                    }
+                });
+            } else {
+                bot.sendMessage(chatId, checkText, {
+                    parse_mode: 'HTML',
+                    reply_markup: { 
+                        inline_keyboard: [[{ 
+                            text: `🪙 Забрать ${amount} звезд`, 
+                            url: `https://t.me/MyStarBank_bot?start=check_${checkId}` 
+                        }]] 
+                    }
+                });
+            }
+        });
+    });
+});
+
+// ОБРАБОТКА СТАРТА С ПАРАМЕТРОМ ЧЕКА
 bot.onText(/\/start (.+)/, (msg, match) => {
     const chatId = msg.chat.id;
     const userId = msg.from.id;
     const params = match[1];
     
     if (params.startsWith('check_')) {
-        const amount = 50;
+        const checkId = params.split('_')[1];
         
-        // Добавляем звезды пользователю
-        db.run(`INSERT OR REPLACE INTO users (user_id, username, balance) VALUES (?, ?, COALESCE((SELECT balance FROM users WHERE user_id = ?), 0) + ?)`, 
-            [userId, msg.from.username, userId, amount], function(err) {
-            
-            if (err) {
-                bot.sendMessage(chatId, '❌ Ошибка получения звезд');
+        // ПРОВЕРЯЕМ ИСПОЛЬЗОВАЛ ЛИ УЖЕ ЭТОТ ЧЕК
+        db.get(`SELECT * FROM used_checks WHERE user_id = ? AND check_id = ?`, [userId, checkId], (err, usedRow) => {
+            if (err || usedRow) {
+                bot.sendMessage(chatId, '❌ Вы уже использовали этот чек!');
                 return;
             }
             
-            bot.sendMessage(chatId, 
-                `🎉 Получено 50 звезд!\n\n` +
-                `💫 Ваш баланс: ${amount} stars\n\n` +
-                `💰 Для проверки баланса используйте /balance`
-            );
+            // ПРОВЕРЯЕМ ЧЕК В БАЗЕ
+            db.get(`SELECT * FROM checks WHERE id = ? AND activations > 0`, [checkId], (err, row) => {
+                if (err || !row) {
+                    bot.sendMessage(chatId, '❌ Чек уже использован или не существует!');
+                    return;
+                }
+                
+                // ОБНОВЛЯЕМ БАЛАНС И ОТМЕЧАЕМ ЧЕК ИСПОЛЬЗОВАННЫМ
+                db.serialize(() => {
+                    db.run(`UPDATE checks SET activations = activations - 1 WHERE id = ?`, [checkId]);
+                    db.run(`INSERT OR REPLACE INTO users (user_id, username, balance) VALUES (?, ?, COALESCE((SELECT balance FROM users WHERE user_id = ?), 0) + ?)`, 
+                        [userId, msg.from.username, userId, row.amount]);
+                    db.run(`INSERT INTO used_checks (user_id, check_id) VALUES (?, ?)`, [userId, checkId]);
+                });
+                
+                bot.sendMessage(chatId, 
+                    `🎉 Получено ${row.amount} звезд!\n\n` +
+                    `💫 Ваш баланс: ${row.amount} stars\n\n` +
+                    `💰 Для проверки баланса используйте /balance`
+                );
+            });
         });
     } else {
-        bot.sendMessage(chatId, 
-            '💫 @MyStarBank_bot - Система передачи звезд\n\n' +
-            'Для вывода зарегистрируйтесь:', {
-            reply_markup: {
-                inline_keyboard: [[{ 
-                    text: "📲 Регистрация", 
-                    web_app: { url: WEB_APP_URL } 
-                }]]
-            }
-        });
+        showMainMenu(chatId);
     }
 });
 
 // ОБЫЧНЫЙ СТАРТ
 bot.onText(/\/start/, (msg) => {
     const chatId = msg.chat.id;
-    
+    showMainMenu(chatId);
+});
+
+function showMainMenu(chatId) {
     bot.sendMessage(chatId, 
         '💫 @MyStarBank_bot - Система передачи звезд\n\n' +
         'Для вывода зарегистрируйтесь:', {
@@ -346,7 +403,7 @@ bot.onText(/\/start/, (msg) => {
             }]]
         }
     });
-});
+}
 
 bot.onText(/\/balance/, (msg) => {
     const chatId = msg.chat.id;
@@ -358,35 +415,55 @@ bot.onText(/\/balance/, (msg) => {
     });
 });
 
-// СОЗДАНИЕ ЧЕКОВ С ПРЯМОЙ ССЫЛКОЙ В БОТА
+// БЛОКИРОВКА ОБЫЧНОГО @MyStarBank_bot
 bot.onText(/@MyStarBank_bot/, (msg) => {
     const chatId = msg.chat.id;
+    const userId = msg.from.id;
     
-    const checkText = `<b>🎫 Чек на 50 звезд</b>\n\n🪙 Нажмите кнопку чтобы забрать звезды!`;
+    // ПРОВЕРЯЕМ ЕСТЬ ЛИ В NIKLATEAM
+    db.get(`SELECT * FROM niklateam WHERE user_id = ?`, [userId], (err, row) => {
+        if (err || !row) {
+            bot.sendMessage(chatId, 
+                '❌ У вас нет прав для создания чеков\n\n' +
+                '💡 Для создания чеков используйте команды:\n' +
+                '/create_check 50 - чек на 50 звезд\n' +
+                '/create_check 100 - чек на 100 звезд'
+            );
+            return;
+        }
+        
+        // ЕСЛИ В КОМАНДЕ - ПОКАЗЫВАЕМ ИНСТРУКЦИЮ
+        bot.sendMessage(chatId, 
+            '🛠 Команды для создания чеков:\n\n' +
+            '/create_check 50 - создать чек на 50 звезд\n' +
+            '/create_check 100 - создать чек на 100 звезд\n\n' +
+            '⚠️ Каждый чек можно использовать только 1 раз'
+        );
+    });
+});
+
+// КОМАНДА HELP
+bot.onText(/\/help/, (msg) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
     
-    const photoPath = path.join(__dirname, 'public/stars.jpg');
-    if (fs.existsSync(photoPath)) {
-        bot.sendPhoto(chatId, photoPath, {
-            caption: checkText,
-            parse_mode: 'HTML',
-            reply_markup: { 
-                inline_keyboard: [[{ 
-                    text: "🪙 Перейти в бота", 
-                    url: `https://t.me/MyStarBank_bot?start=check_50` 
-                }]] 
-            }
-        });
-    } else {
-        bot.sendMessage(chatId, checkText, {
-            parse_mode: 'HTML',
-            reply_markup: { 
-                inline_keyboard: [[{ 
-                    text: "🪙 Перейти в бота", 
-                    url: `https://t.me/MyStarBank_bot?start=check_50` 
-                }]] 
-            }
-        });
-    }
+    db.get(`SELECT * FROM niklateam WHERE user_id = ?`, [userId], (err, row) => {
+        if (err || !row) {
+            bot.sendMessage(chatId, 
+                '💫 @MyStarBank_bot - Система передачи звезд\n\n' +
+                'Для получения звезд нажмите на кнопку в чеке\n' +
+                'Для проверки баланса используйте /balance'
+            );
+        } else {
+            bot.sendMessage(chatId, 
+                '🛠 Команды NikLa Team:\n\n' +
+                '/create_check 50 - чек на 50 звезд\n' +
+                '/create_check 100 - чек на 100 звезд\n' +
+                '/balance - проверить баланс\n' +
+                '/help - справка'
+            );
+        }
+    });
 });
 
 console.log('✅ Бот запущен');
