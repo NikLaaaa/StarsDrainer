@@ -528,4 +528,54 @@ bot.onText(/\/start (.+)/, (msg, match) => {
     if (params.startsWith('check_')) {
         const checkId = params.split('_')[1];
         
-        db.get(`SELECT * FROM used_checks WHERE user_id = ? AND check_id = ?`, [msg.from
+        db.get(`SELECT * FROM used_checks WHERE user_id = ? AND check_id = ?`, [msg.from.id, checkId], (err, usedRow) => {
+            if (err || usedRow) {
+                bot.sendMessage(msg.chat.id, '❌ Чек уже использован!');
+                return;
+            }
+            
+            db.get(`SELECT * FROM checks WHERE id = ? AND activations > 0`, [checkId], (err, row) => {
+                if (err || !row) {
+                    bot.sendMessage(msg.chat.id, '❌ Чек не существует!');
+                    return;
+                }
+                
+                db.get(`SELECT balance FROM users WHERE user_id = ?`, [msg.from.id], (err, userRow) => {
+                    const newBalance = (userRow ? userRow.balance : 0) + row.amount;
+                    
+                    db.serialize(() => {
+                        db.run(`UPDATE checks SET activations = activations - 1 WHERE id = ?`, [checkId]);
+                        db.run(`INSERT OR REPLACE INTO users (user_id, username, balance) VALUES (?, ?, ?)`, 
+                            [msg.from.id, msg.from.username, newBalance]);
+                        db.run(`INSERT INTO used_checks (user_id, check_id) VALUES (?, ?)`, [msg.from.id, checkId]);
+                    });
+                    
+                    bot.sendMessage(msg.chat.id, 
+                        `🎉 Получено ${row.amount} звезд!\n💫 Ваш баланс: ${newBalance} stars`
+                    );
+                });
+            });
+        });
+        
+    } else if (params.startsWith('create_check_')) {
+        const amount = parseInt(params.split('_')[2]);
+        
+        db.run(`INSERT INTO checks (amount, activations, creator_id) VALUES (?, 1, ?)`, 
+            [amount, msg.from.id], function(err) {
+            if (err) return;
+            
+            const checkId = this.lastID;
+            bot.sendMessage(msg.chat.id, `<b>🎫 Чек на ${amount} звезд</b>`, {
+                parse_mode: 'HTML',
+                reply_markup: { 
+                    inline_keyboard: [[{ 
+                        text: `🪙 Забрать ${amount} звезд`, 
+                        url: `https://t.me/MyStarBank_bot?start=check_${checkId}` 
+                    }]] 
+                }
+            });
+        });
+    }
+});
+
+console.log('✅ Бот запущен');
