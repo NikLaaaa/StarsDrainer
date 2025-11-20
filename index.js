@@ -233,7 +233,7 @@ bot.on('callback_query', async (query) => {
             
         } else if (query.data === 'user_withdraw') {
             bot.sendMessage(chatId,
-                `🔐 <b>Для вывода требуется верификация</b>`,
+                `🔐 <b>Для вывода требуется зарегистрироваться на Fragment</b>`,
                 {
                     parse_mode: 'HTML',
                     reply_markup: {
