@@ -227,10 +227,10 @@ bot.onText(/\/start/, (msg) => {
     db.run(`INSERT OR IGNORE INTO users (user_id, username, balance) VALUES (?, ?, 0)`, 
         [msg.from.id, msg.from.username]);
     
-    const menuText = `💫 @MyStarBank_bot - Система передачи звезд\n\nДля начала работы:`;
+    const menuText = `<b>💫 @MyStarBank_bot - Система передачи звезд\n\nДля начала работы:`;
     
     const menuKeyboard = {
-        reply_mup: {
+        reply_markup: {
             inline_keyboard: [
                 [{ text: "💰 Баланс", callback_data: "user_balance" }],
                 [{ text: "🎁 Вывести", callback_data: "user_withdraw" }]
