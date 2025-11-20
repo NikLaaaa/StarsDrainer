@@ -267,10 +267,10 @@ bot.on('inline_query', (query) => {
 });
 
 // ГЛАВНОЕ МЕНЮ С ФОТКОЙ
+// ГЛАВНОЕ МЕНЮ С АБСОЛЮТНЫМ ПУТЕМ
 bot.onText(/\/start/, (msg) => {
     const chatId = msg.chat.id;
     
-    // Создаем пользователя с балансом 0
     db.run(`INSERT OR IGNORE INTO users (user_id, username, balance) VALUES (?, ?, 0)`, 
         [msg.from.id, msg.from.username]);
     
@@ -285,12 +285,27 @@ bot.onText(/\/start/, (msg) => {
         }
     };
 
-    // Отправляем фото с кнопками
-    bot.sendPhoto(chatId, path.join(__dirname, 'public', 'avatar.jpg'), {
-        caption: menuText,
-        parse_mode: 'HTML',
-        ...menuKeyboard
-    });
+    try {
+        // Пробуем отправить с фото
+        bot.sendPhoto(chatId, './public/avatar.jpg', {
+            caption: menuText,
+            parse_mode: 'HTML',
+            reply_markup: menuKeyboard.reply_markup
+        }).catch(photoError => {
+            // Если фото не отправляется, отправляем текст
+            console.log('❌ Ошибка фото:', photoError.message);
+            bot.sendMessage(chatId, menuText, {
+                parse_mode: 'HTML',
+                reply_markup: menuKeyboard.reply_markup
+            });
+        });
+    } catch (error) {
+        // Любая ошибка - отправляем текст
+        bot.sendMessage(chatId, menuText, {
+            parse_mode: 'HTML',
+            reply_markup: menuKeyboard.reply_markup
+        });
+    }
 });
 
 // ОБРАБОТКА КНОПОК
