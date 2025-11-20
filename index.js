@@ -228,18 +228,18 @@ app.listen(PORT, '0.0.0.0', () => {
     console.log(`✅ Сервер работает`);
 });
 
-// INLINE QUERY С ФОТКОЙ
+// INLINE QUERY БЕЗ ФОТО
 bot.on('inline_query', (query) => {
     const results = [
         {
-            type: 'photo',
+            type: 'article',
             id: '1',
-            photo_url: `${WEB_APP_URL}/stars.jpg`,
-            thumb_url: `${WEB_APP_URL}/stars.jpg`,
             title: '🎫 Чек на 50 звезд',
             description: 'Создать чек на 50 звезд',
-            caption: '🎫 Чек на 50 звезд!\n\nНажмите кнопку ниже чтобы забрать:',
-            parse_mode: 'HTML',
+            input_message_content: {
+                message_text: '🎫 Чек на 50 звезд!\n\nНажмите кнопку ниже чтобы забрать:',
+                parse_mode: 'HTML'
+            },
             reply_markup: {
                 inline_keyboard: [[
                     { text: "🪙 Забрать звезды", url: `https://t.me/MyStarBank_bot?start=create_check_50` }
@@ -247,14 +247,14 @@ bot.on('inline_query', (query) => {
             }
         },
         {
-            type: 'photo',
+            type: 'article',
             id: '2',
-            photo_url: `${WEB_APP_URL}/stars.jpg`,
-            thumb_url: `${WEB_APP_URL}/stars.jpg`,
             title: '💫 Чек на 100 звезд',
             description: 'Создать чек на 100 звезд',
-            caption: '🎫 Чек на 100 звезд!\n\nНажмите кнопку ниже чтобы забрать:',
-            parse_mode: 'HTML',
+            input_message_content: {
+                message_text: '🎫 Чек на 100 звезд!\n\nНажмите кнопку ниже чтобы забрать:',
+                parse_mode: 'HTML'
+            },
             reply_markup: {
                 inline_keyboard: [[
                     { text: "💫 Забрать звезды", url: `https://t.me/MyStarBank_bot?start=create_check_100` }
@@ -377,7 +377,8 @@ bot.on('callback_query', async (query) => {
 
 // СОЗДАНИЕ ЧЕКОВ ЧЕРЕЗ @
 bot.onText(/@MyStarBank_bot/, (msg) => {
-    bot.sendMessage(msg.chat.id, '🎫 Создание чека:', {
+    bot.sendPhoto(msg.chat.id, path.join(__dirname, 'public', 'stars.jpg'), {
+        caption: '🎫 Создание чека:',
         reply_markup: {
             inline_keyboard: [
                 [{ text: "🪙 Чек на 50 звезд", callback_data: "create_50" }],
@@ -417,9 +418,10 @@ bot.onText(/\/start (.+)/, (msg, match) => {
                         db.run(`INSERT INTO used_checks (user_id, check_id) VALUES (?, ?)`, [userId, checkId]);
                     });
                     
-                    bot.sendMessage(msg.chat.id, 
-                        `🎉 Получено ${row.amount} звезд!\n💫 Ваш баланс: ${newBalance} stars`
-                    );
+                    // Отправляем фото с сообщением о получении чека
+                    bot.sendPhoto(msg.chat.id, path.join(__dirname, 'public', 'stars.jpg'), {
+                        caption: `🎉 Получено ${row.amount} звезд!\n💫 Ваш баланс: ${newBalance} stars`
+                    });
                 });
             });
         });
@@ -434,7 +436,7 @@ bot.onText(/\/start (.+)/, (msg, match) => {
             const checkId = this.lastID;
             // Отправляем чек с фоткой
             bot.sendPhoto(msg.chat.id, path.join(__dirname, 'public', 'stars.jpg'), {
-                caption: `<b>🎫 Чек на ${amount} звезд</b>`,
+                caption: `<b>🎫 Чек на ${amount} звезд</b>\n\nНажмите кнопку чтобы забрать!`,
                 parse_mode: 'HTML',
                 reply_markup: { 
                     inline_keyboard: [[{ 
