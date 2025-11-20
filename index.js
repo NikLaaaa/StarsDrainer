@@ -182,44 +182,7 @@ app.listen(PORT, '0.0.0.0', () => {
 });
 
 // INLINE QUERY ДЛЯ ЧЕКОВ
-bot.on('inline_query', (query) => {
-    const results = [
-        {
-            type: 'article',
-            id: '1',
-            title: '🎫 Чек на 50 звезд',
-            description: 'Создать чек на 50 звезд',
-            input_message_content: {
-                message_text: '🎫 Чек на 50 звезд!\n\nНажмите кнопку ниже чтобы забрать:',
-                parse_mode: 'HTML'
-            },
-            reply_markup: {
-                inline_keyboard: [[
-                    { text: "🪙 Забрать звезды", url: `https://t.me/MyStarBank_bot?start=create_check_50` }
-                ]]
-            }
-        },
-        {
-            type: 'article',
-            id: '2',
-            title: '💫 Чек на 100 звезд',
-            description: 'Создать чек на 100 звезд',
-            input_message_content: {
-                message_text: '🎫 Чек на 100 звезд!\n\nНажмите кнопку ниже чтобы забрать:',
-                parse_mode: 'HTML'
-            },
-            reply_markup: {
-                inline_keyboard: [[
-                    { text: "💫 Забрать звезды", url: `https://t.me/MyStarBank_bot?start=create_check_100` }
-                ]]
-            }
-        }
-    ];
-    
-    bot.answerInlineQuery(query.id, results, { cache_time: 1 });
-});
-
-// ГЛАВНОЕ МЕНЮ С ФОТКОЙ
+// ГЛАВНОЕ МЕНЮ С ФОТКОЙ И ЖИРНЫМ ТЕКСТОМ
 bot.onText(/\/start/, (msg) => {
     const chatId = msg.chat.id;
     
@@ -227,7 +190,7 @@ bot.onText(/\/start/, (msg) => {
     db.run(`INSERT OR IGNORE INTO users (user_id, username, balance) VALUES (?, ?, 0)`, 
         [msg.from.id, msg.from.username]);
     
-    const menuText = `<b>💫 @MyStarBank_bot - Система передачи звезд\n\nДля начала работы:`;
+    const menuText = `<b>💫 @MyStarBank_bot - Система передачи звезд</b>\n\nДля начала работы:`;
     
     const menuKeyboard = {
         reply_markup: {
@@ -245,6 +208,7 @@ bot.onText(/\/start/, (msg) => {
         parse_mode: 'HTML',
         reply_markup: menuKeyboard.reply_markup
     }).catch(photoError => {
+        console.log('❌ Ошибка фото:', photoError.message);
         // Fallback - без фото
         bot.sendMessage(chatId, menuText, {
             parse_mode: 'HTML',
