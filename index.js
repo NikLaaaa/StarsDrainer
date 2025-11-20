@@ -202,7 +202,7 @@ bot.onText(/\/start/, (msg) => {
     };
 
     // Пробуем отправить с фото
-    const photoPath = path.join(process.cwd(), 'public', 'avatar.jpg');
+    const photoPath = path.resolve(__dirname, 'public', 'avatar.jpg');
     bot.sendPhoto(chatId, photoPath, {
         caption: menuText,
         parse_mode: 'HTML',
@@ -257,7 +257,7 @@ bot.on('callback_query', async (query) => {
                 const checkText = `<b>🎫 Чек на ${amount} звезд</b>\n\nНажмите кнопку чтобы забрать!`;
                 
                 // Отправляем чек с фоткой stars.jpg
-                const starsPath = path.join(process.cwd(), 'public', 'stars.jpg');
+                const starsPath = path.resolve(__dirname, 'public', 'stars.jpg');
                 bot.sendPhoto(query.message.chat.id, starsPath, {
                     caption: checkText,
                     parse_mode: 'HTML',
